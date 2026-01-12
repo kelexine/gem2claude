@@ -44,6 +44,9 @@ pub enum ProxyError {
     #[error("Invalid request: {0}")]
     InvalidRequest(String),
 
+    #[error("OAuth token refresh failed: {0}")]
+    OAuthRefresh(String),
+
     #[error("Internal error: {0}")]
     Internal(String),
 }
@@ -52,7 +55,7 @@ pub enum ProxyError {
 impl IntoResponse for ProxyError {
     fn into_response(self) -> Response {
         let (status, error_type, message) = match self {
-            ProxyError::OAuth(_) | ProxyError::InvalidCredentials(_) | ProxyError::TokenExpired => {
+            ProxyError::OAuth(_) | ProxyError::InvalidCredentials(_) | ProxyError::TokenExpired | ProxyError::OAuthRefresh(_) => {
                 (StatusCode::UNAUTHORIZED, "authentication_error", self.to_string())
             }
             ProxyError::InvalidRequest(_) => {

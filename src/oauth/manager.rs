@@ -1,4 +1,4 @@
-// OAuth manager with credential loading and refresh
+// OAuth manager with credential loading and automatic refresh
 // Author: kelexine (https://github.com/kelexine)
 
 use super::OAuthCredentials;
@@ -8,12 +8,18 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{debug, warn};
+use tokio::sync::{Mutex, RwLock};
+use tracing::{debug, info, warn};
+
+/// Google OAuth2 credentials for Gemini CLI (public, for installed apps)
+/// Source: gemini-cli-0.23.0/packages/core/src/code_assist/oauth2.ts
+const OAUTH_CLIENT_ID: &str = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
+const OAUTH_CLIENT_SECRET: &str = "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";
 
 #[derive(Clone)]
 pub struct OAuthManager {
     credentials: Arc<RwLock<OAuthCredentials>>,
+    refresh_lock: Arc<Mutex<()>>,  // Prevents thundering herd on refresh
     config: OAuthConfig,
 }
 
@@ -30,6 +36,7 @@ impl OAuthManager {
 
         Ok(Self {
             credentials: Arc::new(RwLock::new(credentials)),
+            refresh_lock: Arc::new(Mutex::new(())),
             config: config.clone(),
         })
     }
@@ -82,24 +89,138 @@ impl OAuthManager {
         Ok(())
     }
 
-    /// Get a valid access token (refreshing if needed)
+    /// Get a valid access token (refreshing if needed using double-checked locking)
     pub async fn get_token(&self) -> Result<String> {
-        let creds = self.credentials.read().await;
-        
-        // Check if token is expired or will expire soon
-        if creds.is_expired(self.config.refresh_buffer_seconds) {
-            drop(creds); // Release read lock
-            
-            if !self.config.auto_refresh {
-                return Err(ProxyError::TokenExpired);
+        // FIRST CHECK: Fast path with read lock
+        {
+            let creds = self.credentials.read().await;
+            if !creds.is_expired(self.config.refresh_buffer_seconds) {
+                return Ok(creds.access_token.clone());
             }
+        } // Release read lock
 
-            warn!("Token expired or expiring soon, refresh needed");
-            // TODO: Implement token refresh in Phase 3
+        // Token expired - check if auto-refresh is enabled
+        if !self.config.auto_refresh {
+            warn!("Token expired and auto_refresh is disabled");
             return Err(ProxyError::TokenExpired);
         }
 
-        Ok(creds.access_token.clone())
+        // Acquire refresh lock (only ONE request enters here)
+        let _guard = self.refresh_lock.lock().await;
+        debug!("Acquired refresh lock");
+
+        // SECOND CHECK: Another thread might have refreshed while we waited
+        {
+            let creds = self.credentials.read().await;
+            if !creds.is_expired(self.config.refresh_buffer_seconds) {
+                debug!("Token was refreshed by another request");
+                return Ok(creds.access_token.clone());
+            }
+        }
+
+        // Still expired - we must refresh
+        warn!("Refreshing expired OAuth token");
+        let new_creds = self.refresh_token().await?;
+
+        // Write new credentials with write lock
+        {
+            let mut creds = self.credentials.write().await;
+            *creds = new_creds.clone();
+        }
+
+        // Persist to disk for future runs
+        self.save_credentials(&new_creds)?;
+
+        info!("Successfully refreshed and saved OAuth token");
+        Ok(new_creds.access_token.clone())
+    }
+
+    /// Refresh the OAuth token using refresh_token
+    async fn refresh_token(&self) -> Result<OAuthCredentials> {
+        let creds = self.credentials.read().await;
+
+        // Build refresh request body
+        let params = [
+            ("client_id", OAUTH_CLIENT_ID),
+            ("client_secret", OAUTH_CLIENT_SECRET),
+            ("refresh_token", &creds.refresh_token),
+            ("grant_type", "refresh_token"),
+        ];
+
+        // Call Google OAuth2 token endpoint
+        let client = reqwest::Client::new();
+        let response = client
+            .post("https://oauth2.googleapis.com/token")
+            .form(&params)
+            .send()
+            .await
+            .map_err(|e| ProxyError::OAuthRefresh(format!("HTTP request failed: {}", e)))?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(ProxyError::OAuthRefresh(format!(
+                "Token refresh failed: {}",
+                error_text
+            )));
+        }
+
+        // Parse response
+        let token_data: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| ProxyError::OAuthRefresh(format!("Failed to parse response: {}", e)))?;
+
+        // Extract new access token
+        let new_access_token = token_data
+            .get("access_token")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ProxyError::OAuthRefresh("No access_token in response".to_string()))?
+            .to_string();
+
+        // Calculate expiry time
+        let expires_in = token_data
+            .get("expires_in")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(3600); // Default to 1 hour
+
+        let new_expiry = chrono::Utc::now().timestamp_millis() + (expires_in * 1000);
+
+        // Build new credentials (reuse existing refresh_token)
+        let new_creds = OAuthCredentials {
+            access_token: new_access_token,
+            refresh_token: creds.refresh_token.clone(),
+            token_type: "Bearer".to_string(),
+            expiry_date: new_expiry,
+            scope: creds.scope.clone(),
+            id_token: String::new(), // Not provided on refresh
+        };
+
+        debug!("Token refreshed, new expiry: {}", new_expiry);
+        Ok(new_creds)
+    }
+
+    /// Save credentials to disk
+    fn save_credentials(&self, creds: &OAuthCredentials) -> Result<()> {
+        use std::io::Write;
+
+        let path = Path::new(&self.config.credentials_path);
+        let json = serde_json::to_string_pretty(creds)
+            .map_err(|e| ProxyError::Internal(format!("Failed to serialize credentials: {}", e)))?;
+
+        let mut file = fs::File::create(path)
+            .map_err(|e| ProxyError::Internal(format!("Failed to create credentials file: {}", e)))?;
+
+        file.write_all(json.as_bytes())
+            .map_err(|e| ProxyError::Internal(format!("Failed to write credentials: {}", e)))?;
+
+        // Ensure secure permissions
+        #[cfg(unix)]
+        {
+            fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        }
+
+        debug!("Saved refreshed credentials to disk");
+        Ok(())
     }
 
     /// Get token expiry information
