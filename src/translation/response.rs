@@ -4,14 +4,18 @@
 use crate::error::{ProxyError, Result};
 use crate::models::anthropic::{ContentBlock, MessagesResponse, Usage};
 use crate::models::gemini::{GenerateContentResponse, Part as GeminiPart};
-use lazy_static::lazy_static;
 use regex::Regex;
+use std::sync::OnceLock;
 use tracing::{debug, warn};
 
-lazy_static! {
-    /// Regex to match <think>...</think> tags from Gemini 3.x responses
-    static ref THINKING_REGEX: Regex =
-        Regex::new(r"(?s)<think>.*?</think>").unwrap();
+/// Lazily initialized regex for thinking tags
+static THINKING_REGEX: OnceLock<Regex> = OnceLock::new();
+
+/// Get or initialize the thinking tag regex
+fn get_thinking_regex() -> &'static Regex {
+    THINKING_REGEX.get_or_init(|| {
+        Regex::new(r"(?s)<think>.*?</think>").expect("Invalid regex pattern")
+    })
 }
 
 /// Translate Gemini response to Anthropic format
@@ -67,7 +71,7 @@ fn strip_thinking_artifacts(parts: Vec<GeminiPart>) -> Result<Vec<GeminiPart>> {
         .filter_map(|part| match part {
             GeminiPart::Text { text } => {
                 // Remove <think>...</think> tags
-                let cleaned = THINKING_REGEX.replace_all(&text, "").to_string();
+                let cleaned = get_thinking_regex().replace_all(&text, "").to_string();
 
                 // Only include if there's remaining content after stripping
                 if cleaned.trim().is_empty() {

@@ -196,13 +196,6 @@ Refresh your token:
 gemini
 ```
 
-### "Insecure file permissions"
-
-Fix with:
-```bash
-chmod 600 ~/.gemini/oauth_creds.json
-```
-
 ### "429 Too Many Requests"
 
 Rate limiting from Gemini API. Wait a few seconds and retry.

@@ -4,10 +4,10 @@
 use crate::error::Result;
 use crate::models::gemini::GenerateContentResponse;
 use crate::models::streaming::*;
-use crate::translation::response::translate_parts;
 use tracing::debug;
 
 /// Translates Gemini streaming chunks into Anthropic SSE events
+/// Includes stateful thinking tag stripping to handle tags split across chunks
 pub struct StreamTranslator {
     message_id: String,
     model: String,
@@ -16,6 +16,9 @@ pub struct StreamTranslator {
     first_chunk: bool,
     block_started: bool,
     accumulated_text: String,
+    // Stateful thinking stripper fields
+    thinking_buffer: String,
+    in_thinking: bool,
 }
 
 impl StreamTranslator {
@@ -28,7 +31,78 @@ impl StreamTranslator {
             first_chunk: true,
             block_started: false,
             accumulated_text: String::new(),
+            thinking_buffer: String::new(),
+            in_thinking: false,
         }
+    }
+
+    /// Process text chunk with stateful thinking tag stripping
+    /// Handles tags that may be split across multiple chunks
+    fn process_text_chunk(&mut self, text: &str) -> String {
+        let mut output = String::new();
+        let mut full_text = self.thinking_buffer.clone() + text;
+        self.thinking_buffer.clear();
+
+        // State machine for thinking tag removal
+        loop {
+            if self.in_thinking {
+                // We're inside a <think> block, look for closing tag
+                match full_text.find("</think>") {
+                    Some(idx) => {
+                        // Found closing tag, skip past it
+                        self.in_thinking = false;
+                        full_text = full_text[idx + 8..].to_string();
+                        // Continue loop to process remainder
+                    }
+                    None => {
+                        // No closing tag yet, might be partial at end
+                        // Check for partial closing tag
+                        if let Some(partial_idx) = Self::find_partial_tag(&full_text, "</think>") {
+                            self.thinking_buffer = full_text[partial_idx..].to_string();
+                        }
+                        // Discard rest - it's thinking content
+                        break;
+                    }
+                }
+            } else {
+                // We're outside thinking block, look for opening tag
+                match full_text.find("<think>") {
+                    Some(idx) => {
+                        // Found opening tag, emit text before it
+                        output.push_str(&full_text[..idx]);
+                        self.in_thinking = true;
+                        full_text = full_text[idx + 7..].to_string();
+                        // Continue loop to find closing tag
+                    }
+                    None => {
+                        // No opening tag, check for partial at end
+                        if let Some(partial_idx) = Self::find_partial_tag(&full_text, "<think>") {
+                            // Move partial tag to buffer for next chunk
+                            output.push_str(&full_text[..partial_idx]);
+                            self.thinking_buffer = full_text[partial_idx..].to_string();
+                        } else {
+                            // Safe to emit all
+                            output.push_str(&full_text);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        output
+    }
+
+    /// Find partial tag match at end of string
+    /// Returns index where partial match starts, or None
+    fn find_partial_tag(text: &str, tag: &str) -> Option<usize> {
+        // Check if text ends with any prefix of the tag
+        for i in 1..tag.len() {
+            let prefix = &tag[..i];
+            if text.ends_with(prefix) {
+                return Some(text.len() - prefix.len());
+            }
+        }
+        None
     }
 
     /// Translate a Gemini chunk into Anthropic SSE events
@@ -73,8 +147,8 @@ impl StreamTranslator {
                 // Get text from parts
                 if let Some(part) = candidate.content.parts.first() {
                     if let crate::models::gemini::Part::Text { text } = part {
-                        // Strip thinking artifacts
-                        let clean_text = strip_thinking(text);
+                        // Strip thinking artifacts using stateful processor
+                        let clean_text = self.process_text_chunk(text);
                         
                         if !clean_text.is_empty() {
                             // 3. On first text, send content_block_start
@@ -149,40 +223,63 @@ impl StreamTranslator {
     }
 }
 
-/// Strip thinking artifacts from text
-fn strip_thinking(text: &str) -> String {
-    // Simple implementation: remove <think>...</think> tags
-    let mut result = text.to_string();
-    while let Some(start) = result.find("<think>") {
-        if let Some(end) = result.find("</think>") {
-            result = format!("{}{}", &result[..start], &result[end + 8..]);
-        } else {
-            break;
-        }
-    }
-    result.trim().to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_strip_thinking() {
-        assert_eq!(
-            strip_thinking("Hello <think>test</think> world"),
-            "Hello  world"
-        );
-        assert_eq!(strip_thinking("No thinking here"), "No thinking here");
-        assert_eq!(
-            strip_thinking("<think>all thinking</think>"),
-            ""
-        );
+    fn test_thinking_stripper_simple() {
+        let mut translator = StreamTranslator::new("test".to_string());
+        
+        // Simple case: complete tag in one chunk
+        let result = translator.process_text_chunk("Hello <think>internal</think> world");
+        assert_eq!(result, "Hello  world");
+    }
+
+    #[test]
+    fn test_thinking_stripper_split_open() {
+        let mut translator = StreamTranslator::new("test".to_string());
+        
+        // Tag split across chunks: open tag
+        let result1 = translator.process_text_chunk("Hello <thi");
+        assert_eq!(result1, "Hello ");
+        
+        let result2 = translator.process_text_chunk("nk>secret</think> world");
+        assert_eq!(result2, " world");
+    }
+
+    #[test]
+    fn test_thinking_stripper_split_close() {
+        let mut translator = StreamTranslator::new("test".to_string());
+        
+        // Already in thinking, close tag split
+        let result1 = translator.process_text_chunk("<think>secret</thi");
+        assert_eq!(result1, "");
+        
+        let result2 = translator.process_text_chunk("nk> visible");
+        assert_eq!(result2, " visible");
+    }
+
+    #[test]
+    fn test_thinking_stripper_nested() {
+        let mut translator = StreamTranslator::new("test".to_string());
+        
+        // Multiple think blocks
+        let result = translator.process_text_chunk("A<think>x</think>B<think>y</think>C");
+        assert_eq!(result, "ABC");
+    }
+
+    #[test]
+    fn test_partial_tag_detection() {
+        assert_eq!(StreamTranslator::find_partial_tag("hello<", "<think>"), Some(5));
+        assert_eq!(StreamTranslator::find_partial_tag("hello<t", "<think>"), Some(5));
+        assert_eq!(StreamTranslator::find_partial_tag("hello<thi", "<think>"), Some(5));
+        assert_eq!(StreamTranslator::find_partial_tag("hello", "<think>"), None);
     }
 
     #[test]
     fn test_translator_first_chunk() {
-        let mut translator = StreamTranslator::new("claude-sonnet-4-5".to_string());
+        let mut translator = StreamTranslator::new("claude-sonnet-4".to_string());
         
         // First chunk should generate message_start
         let chunk = GenerateContentResponse {

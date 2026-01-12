@@ -2,12 +2,15 @@
 // Author: kelexine (https://github.com/kelexine)
 
 use crate::error::{ProxyError, Result};
-use lazy_static::lazy_static;
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
-lazy_static! {
-    /// Maps Claude model names to Gemini model names
-    pub static ref MODEL_MAP: HashMap<&'static str, &'static str> = {
+/// Lazily initialized model map using OnceLock (zero-cost, panic-free)
+static MODEL_MAP: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+
+/// Get or initialize the model mapping
+fn get_model_map() -> &'static HashMap<&'static str, &'static str> {
+    MODEL_MAP.get_or_init(|| {
         let mut m = HashMap::new();
 
         // Latest models (Gemini 3.x Preview - late 2025 / early 2026)
@@ -15,8 +18,8 @@ lazy_static! {
         m.insert("claude-opus-4-5", "gemini-3-pro-preview");
         m.insert("claude-sonnet-4-5", "gemini-3-flash-preview");
         m.insert("claude-sonnet-4", "gemini-3-flash-preview");
-        m.insert("claude-haiku-4", "gemini-2.5-flash-lite");
-        m.insert("claude-haiku-4-5", "gemini-2.5-flash-lite");
+        m.insert("claude-haiku-4", "gemini-2.5-flash");
+        m.insert("claude-haiku-4-5", "gemini-2.5-pro");
 
         // Previous generation (Gemini 2.5)
         m.insert("claude-3-5-sonnet-20241022", "gemini-2.5-flash");
@@ -29,7 +32,7 @@ lazy_static! {
         m.insert("claude-3-haiku", "gemini-2.5-flash-lite");
 
         m
-    };
+    })
 }
 
 /// Map Claude model name to Gemini model name
@@ -38,14 +41,14 @@ pub fn map_model(claude_model: &str) -> Result<String> {
     // e.g., "claude-sonnet-4-5-20250929" -> "claude-sonnet-4-5"
     let normalized = strip_date_suffix(claude_model);
     
-    MODEL_MAP
+    get_model_map()
         .get(normalized.as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| {
             ProxyError::InvalidRequest(format!(
                 "Unsupported model: {}. Supported models: {}",
                 claude_model,
-                MODEL_MAP.keys().copied().collect::<Vec<_>>().join(", ")
+                get_model_map().keys().copied().collect::<Vec<_>>().join(", ")
             ))
         })
 }
@@ -88,7 +91,7 @@ mod tests {
         );
         assert_eq!(
             map_model("claude-haiku-4-5-20251001").unwrap(),
-            "gemini-2.5-flash-lite"
+            "gemini-2.5-pro"
         );
         
         // Test without date suffix
