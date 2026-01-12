@@ -161,51 +161,68 @@ async fn stream_messages_handler(
     // 3. Create translator
     let mut translator = StreamTranslator::new(req.model.clone());
 
-    // 4. Transform Gemini chunks to Anthropic SSE events
+    // 4. Transform Gemini chunks to Anthropic SSE events with Keep-Alive Pings
     let sse_stream = async_stream::stream! {
         debug!("Starting SSE stream transformation");
         futures::pin_mut!(gemini_stream);
         
         let mut chunk_count = 0;
-        while let Some(chunk_result) = gemini_stream.next().await {
-            chunk_count += 1;
-            debug!("Received Gemini chunk #{}", chunk_count);
-            
-            match chunk_result {
-                Ok(chunk) => {
-                    // Translate chunk to events
-                    match translator.translate_chunk(chunk) {
-                        Ok(events) => {
-                            debug!("Translated chunk to {} events", events.len());
-                            for (i, event) in events.iter().enumerate() {
-                                debug!("Yielding event #{}: {:?}", i, event);
-                                yield Ok::<String, std::convert::Infallible>(event.to_sse());
+        loop {
+            tokio::select! {
+                chunk_opt = gemini_stream.next() => {
+                    match chunk_opt {
+                        Some(chunk_result) => {
+                            chunk_count += 1;
+                            debug!("Received Gemini chunk #{}", chunk_count);
+                            
+                            match chunk_result {
+                                Ok(chunk) => {
+                                    // Translate chunk to events
+                                    match translator.translate_chunk(chunk) {
+                                        Ok(events) => {
+                                            debug!("Translated chunk to {} events", events.len());
+                                            for (i, event) in events.iter().enumerate() {
+                                                debug!("Yielding event #{}: {:?}", i, event);
+                                                yield Ok::<String, std::convert::Infallible>(event.to_sse());
+                                            }
+                                        }
+                                        Err(e) => {
+                                            warn!("Translation error: {}", e);
+                                            let error_event = crate::models::streaming::StreamEvent::Error {
+                                                error: crate::models::streaming::ErrorData {
+                                                    error_type: "translation_error".to_string(),
+                                                    message: e.to_string(),
+                                                },
+                                            };
+                                            yield Ok(error_event.to_sse());
+                                            break;
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!("Stream error: {}", e);
+                                    let error_event = crate::models::streaming::StreamEvent::Error {
+                                        error: crate::models::streaming::ErrorData {
+                                            error_type: "api_error".to_string(),
+                                            message: e.to_string(),
+                                        },
+                                    };
+                                    yield Ok(error_event.to_sse());
+                                    break;
+                                }
                             }
                         }
-                        Err(e) => {
-                            warn!("Translation error: {}", e);
-                            // Send error event
-                            let error_event = crate::models::streaming::StreamEvent::Error {
-                                error: crate::models::streaming::ErrorData {
-                                    error_type: "translation_error".to_string(),
-                                    message: e.to_string(),
-                                },
-                            };
-                            yield Ok(error_event.to_sse());
+                        None => {
+                            // Stream finished normally
                             break;
                         }
                     }
                 }
-                Err(e) => {
-                    warn!("Stream error: {}", e);
-                    let error_event = crate::models::streaming::StreamEvent::Error {
-                        error: crate::models::streaming::ErrorData {
-                            error_type: "api_error".to_string(),
-                            message: e.to_string(),
-                        },
-                    };
-                    yield Ok(error_event.to_sse());
-                    break;
+                _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
+                    // Send ping to keep connection alive and prevent idle timeouts
+                    debug!("Yielding Keep-Alive Ping");
+                    let ping_event = "event: ping\ndata: {\"type\": \"ping\"}\n\n".to_string();
+                    yield Ok(ping_event);
                 }
             }
         }
@@ -219,10 +236,19 @@ async fn stream_messages_handler(
     
     Ok(Response::builder()
         .status(200)
-        .header("Content-Type", "text/event-stream")
+        .header("Content-Type", "text/event-stream; charset=utf-8")
         .header("Cache-Control", "no-cache")
         .header("Connection", "keep-alive")
         .header("X-Accel-Buffering", "no") // Disable nginx buffering
+        // Crucial headers for Claude Code SDK compatibility
+        .header("anthropic-version", "2023-06-01")
+        .header("anthropic-ratelimit-requests-limit", "50")
+        .header("anthropic-ratelimit-requests-remaining", "49")
+        .header("anthropic-ratelimit-requests-reset", chrono::Utc::now().to_rfc3339())
+        .header("anthropic-ratelimit-tokens-limit", "1000000")
+        .header("anthropic-ratelimit-tokens-remaining", "999950")
+        .header("anthropic-ratelimit-tokens-reset", chrono::Utc::now().to_rfc3339())
+        .header("request-id", format!("req_{}", uuid::Uuid::new_v4()))
         .body(body)
         .unwrap())
 }
