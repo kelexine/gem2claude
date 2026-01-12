@@ -136,34 +136,16 @@ fn parse_sse_event(event_data: &str) -> Option<GenerateContentResponse> {
         return None;
     }
    
-    // Parse JSON - the internal API wraps everything in {"response": {...}}
-    let parsed: serde_json::Value = match serde_json::from_str(data) {
-        Ok(v) => v,
-        Err(e) => {
-            warn!("Failed to parse SSE JSON: {}", e);
-            debug!("Raw data: {}", data.chars().take(200).collect::<String>());
-            return None;
-        }
-    };
-    
-    // Unwrap the response envelope
-    let response_data = if let Some(inner) = parsed.get("response") {
-        debug!("Unwrapping response envelope");
-        inner.clone()
-    } else {
-        // Already unwrapped or different format
-        debug!("No response envelope found, using data as-is");
-        parsed
-    };
-    
-    // Convert to GenerateContentResponse
-    match serde_json::from_value::<GenerateContentResponse>(response_data) {
+    // Parse JSON directly into GenerateContentResponse
+    // The internal API returns {"response": {...}} which matches our struct
+    match serde_json::from_str::<GenerateContentResponse>(data) {
         Ok(response) => {
             debug!("Successfully parsed SSE event into GenerateContentResponse");
             Some(response)
         }
         Err(e) => {
-            warn!("Failed to convert to GenerateContentResponse: {}", e);
+            warn!("Failed to parse SSE event: {}", e);
+            debug!("Raw data: {}", data.chars().take(200).collect::<String>());
             None
         }
     }

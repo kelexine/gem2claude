@@ -6,7 +6,7 @@
 
 ## Overview
 
-`gem2claude` is a high-performance Rust proxy that enables [Claude Code](https://github.com/anthropics/anthropic-tools) to work seamlessly with Google's Gemini models via OAuth authentication. If you have a Google Pro subscription with access to Gemini models but want to use Claude Code's superior terminal agent capabilities, this proxy is your solution.
+`gem2claude` is a high-performance Rust proxy that enables Claude Code to work seamlessly with Google's Gemini models via OAuth authentication. If you have a Google Pro subscription with access to Gemini models but want to use Claude Code's superior terminal agent capabilities, this proxy is your solution.
 
 ## Key Features
 
@@ -26,7 +26,7 @@ Before using gem2claude, you need:
    ```bash
    # Install Gemini CLI if you haven't already
    # Then authenticate
-   gemini auth login
+   gemini
    ```
    
    This creates `~/.gemini/oauth_creds.json` which gem2claude uses.
