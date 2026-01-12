@@ -127,62 +127,71 @@ impl GeminiClient {
         &self.config.api_base_url
     }
 
-    /// Call Gemini generateContent API
+    /// Call Gemini generateContent API with intelligent retry logic
     pub async fn generate_content(
         &self,
         request: crate::models::gemini::GenerateContentRequest,
         model: &str,
     ) -> Result<crate::models::gemini::GenerateContentResponse> {
         let url = format!("{}:generateContent", self.config.api_base_url);
-        let access_token = self.oauth_manager.get_token().await?;
-
         debug!("Calling generateContent API for model: {}", model);
 
-        // Wrap request in internal API structure
+        // Wrap request in internal API structure (prepare once)
         let wrapped_request = crate::models::gemini::InternalApiRequest {
-            model: model.to_string(),  // No "models/" prefix for internal API
+            model: model.to_string(),
             project: Some(self.project_id.clone()),
             user_prompt_id: Some(format!("req_{}", uuid::Uuid::new_v4().simple())),
-            request,
+            request: request.clone(),
         };
 
-        // DEBUG: Log the actual JSON being sent
-        if let Ok(json_str) = serde_json::to_string_pretty(&wrapped_request) {
-            debug!("=== GEMINI API REQUEST ===\n{}\n=========================", json_str);
-        }
+        // Clone what we need for the retry closure
+        let http_client = self.http_client.clone();
+        let url = url.clone();
+        let oauth_manager = self.oauth_manager.clone();
+        let wrapped_request = wrapped_request.clone();
 
-        let response = self
-            .http_client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", access_token))
-            .header("Content-Type", "application/json")
-            .json(&wrapped_request)
-            .send()
-            .await?;
+        // Use intelligent retry with Google's retryDelay hints
+        crate::utils::retry::with_retry(
+            "Gemini API",
+            || async {
+                let access_token = oauth_manager.get_token().await
+                    .map_err(|e| (500, format!("OAuth error: {}", e)))?;
 
-        let status = response.status();
-        if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            error!(
-                "Gemini API error: HTTP {} - Response body: {}",
-                status, error_text
-            );
-            return Err(ProxyError::GeminiApi(format!(
-                "HTTP {}: {}",
-                status, error_text
-            )));
-        }
+                let response = http_client
+                    .post(&url)
+                    .header("Authorization", format!("Bearer {}", access_token))
+                    .header("Content-Type", "application/json")
+                    .json(&wrapped_request)
+                    .send()
+                    .await
+                    .map_err(|e| (500, format!("HTTP error: {}", e)))?;
 
-        let gemini_response: crate::models::gemini::GenerateContentResponse = response
-            .json()
-            .await
-            .map_err(|e| {
-                error!("Failed to parse Gemini response: {}", e);
-                ProxyError::GeminiApi(format!("Response parsing error: {}", e))
-            })?;
+                let status = response.status();
+                if !status.is_success() {
+                    let error_text = response.text().await.unwrap_or_default();
+                    error!(
+                        "Gemini API error: HTTP {} - Response body: {}",
+                        status, error_text
+                    );
+                    return Err((status.as_u16(), error_text));
+                }
 
-        debug!("Successfully received Gemini response");
-        Ok(gemini_response)
+                let gemini_response: crate::models::gemini::GenerateContentResponse = response
+                    .json()
+                    .await
+                    .map_err(|e| {
+                        error!("Failed to parse Gemini response: {}", e);
+                        (500, format!("Response parsing error: {}", e))
+                    })?;
+
+                debug!("Successfully received Gemini response");
+                Ok(gemini_response)
+            },
+        )
+        .await
+        .map_err(|(status, error_body)| {
+            ProxyError::GeminiApi(format!("HTTP {}: {}", status, error_body))
+        })
     }
 
     /// Call Gemini streamGenerateContent API for SSE streaming
