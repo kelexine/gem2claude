@@ -59,6 +59,7 @@ zeroize = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1"
+phf = { version = "0.11", features = ["macros"] }
 dirs = "5"
 num_cpus = "1"
 

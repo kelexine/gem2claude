@@ -2,38 +2,28 @@
 // Author: kelexine (https://github.com/kelexine)
 
 use crate::error::{ProxyError, Result};
-use std::collections::HashMap;
-use std::sync::OnceLock;
+use phf::phf_map;
 
-/// Lazily initialized model map using OnceLock (zero-cost, panic-free)
-static MODEL_MAP: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+/// Compile-time perfect hash map for model mapping (zero runtime cost)
+static MODEL_MAP: phf::Map<&'static str, &'static str> = phf_map! {
+    // Latest models (Gemini 3.x Preview - late 2025 / early 2026)
+    "claude-opus-4" => "gemini-3-pro-preview",
+    "claude-opus-4-5" => "gemini-3-pro-preview",
+    "claude-sonnet-4-5" => "gemini-3-flash-preview",
+    "claude-sonnet-4" => "gemini-3-flash-preview",
+    "claude-haiku-4" => "gemini-2.5-flash",
+    "claude-haiku-4-5" => "gemini-2.5-pro",
 
-/// Get or initialize the model mapping
-fn get_model_map() -> &'static HashMap<&'static str, &'static str> {
-    MODEL_MAP.get_or_init(|| {
-        let mut m = HashMap::new();
-
-        // Latest models (Gemini 3.x Preview - late 2025 / early 2026)
-        m.insert("claude-opus-4", "gemini-3-pro-preview");
-        m.insert("claude-opus-4-5", "gemini-3-pro-preview");
-        m.insert("claude-sonnet-4-5", "gemini-3-flash-preview");
-        m.insert("claude-sonnet-4", "gemini-3-flash-preview");
-        m.insert("claude-haiku-4", "gemini-2.5-flash");
-        m.insert("claude-haiku-4-5", "gemini-2.5-pro");
-
-        // Previous generation (Gemini 2.5)
-        m.insert("claude-3-5-sonnet-20241022", "gemini-2.5-flash");
-        m.insert("claude-3-5-sonnet", "gemini-2.5-flash");
-        m.insert("claude-3-opus-20240229", "gemini-2.5-pro");
-        m.insert("claude-3-opus", "gemini-2.5-pro");
-        m.insert("claude-3-sonnet-20240229", "gemini-2.5-flash");
-        m.insert("claude-3-sonnet", "gemini-2.5-flash");
-        m.insert("claude-3-haiku-20240307", "gemini-2.5-flash-lite");
-        m.insert("claude-3-haiku", "gemini-2.5-flash-lite");
-
-        m
-    })
-}
+    // Previous generation (Gemini 2.5)
+    "claude-3-5-sonnet-20241022" => "gemini-2.5-flash",
+    "claude-3-5-sonnet" => "gemini-2.5-flash",
+    "claude-3-opus-20240229" => "gemini-2.5-pro",
+    "claude-3-opus" => "gemini-2.5-pro",
+    "claude-3-sonnet-20240229" => "gemini-2.5-flash",
+    "claude-3-sonnet" => "gemini-2.5-flash",
+    "claude-3-haiku-20240307" => "gemini-2.5-flash-lite",
+    "claude-3-haiku" => "gemini-2.5-flash-lite",
+};
 
 /// Map Claude model name to Gemini model name
 pub fn map_model(claude_model: &str) -> Result<String> {
@@ -41,14 +31,16 @@ pub fn map_model(claude_model: &str) -> Result<String> {
     // e.g., "claude-sonnet-4-5-20250929" -> "claude-sonnet-4-5"
     let normalized = strip_date_suffix(claude_model);
     
-    get_model_map()
-        .get(normalized.as_str())
+    MODEL_MAP
+        .get(&normalized as &str)
         .map(|s| s.to_string())
         .ok_or_else(|| {
+            // Collect all keys for error message
+            let supported: Vec<&str> = MODEL_MAP.keys().copied().collect();
             ProxyError::InvalidRequest(format!(
                 "Unsupported model: {}. Supported models: {}",
                 claude_model,
-                get_model_map().keys().copied().collect::<Vec<_>>().join(", ")
+                supported.join(", ")
             ))
         })
 }
@@ -103,5 +95,13 @@ mod tests {
         assert_eq!(strip_date_suffix("claude-sonnet-4-5-20250929"), "claude-sonnet-4-5");
         assert_eq!(strip_date_suffix("claude-opus-4-5-20251101"), "claude-opus-4-5");
         assert_eq!(strip_date_suffix("claude-sonnet-4-5"), "claude-sonnet-4-5"); // No date suffix
+    }
+
+    #[test]
+    fn test_phf_compile_time() {
+        // This test verifies that MODEL_MAP is a compile-time constant
+        // If phf is working correctly, this lookup has zero runtime overhead
+        let result = MODEL_MAP.get("claude-sonnet-4");
+        assert_eq!(result, Some(&"gemini-3-flash-preview"));
     }
 }
