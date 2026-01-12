@@ -1,0 +1,82 @@
+[package]
+name = "gem2claude"
+version = "0.1.0"
+edition = "2021"
+authors = ["kelexine <https://github.com/kelexine>"]
+description = "OAuth-based Gemini API to Claude Code Compatible Proxy"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/kelexine/gem2claude"
+readme = "README.md"
+keywords = ["gemini", "claude", "proxy", "oauth", "ai"]
+categories = ["command-line-utilities", "web-programming"]
+
+[dependencies]
+# Web Framework
+axum = { version = "0.7", features = ["macros"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["trace", "cors", "compression-gzip", "request-id", "util"] }
+
+# Async Runtime
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+eventsource-client = "0.13"  # SSE client for Gemini streaming
+async-stream = "0.3"          # Async stream macros
+pin-project = "1.1"           # Stream pinning helpers
+
+# HTTP Client
+reqwest = { version = "0.11", features = ["json", "stream", "rustls-tls"], default-features = false }
+hyper = "1.0"
+bytes = "1.5"  # For SSE streaming
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Configuration
+config = "0.14"
+toml = "0.8"
+clap = { version = "4", features = ["derive", "env"] }
+
+# OAuth
+oauth2 = "4"
+
+# Error Handling
+anyhow = "1"
+thiserror = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Metrics
+prometheus = "0.13"
+
+# Security
+ring = "0.17"
+zeroize = { version = "1", features = ["derive"] }
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1"
+lazy_static = "1.4"
+dirs = "5"
+num_cpus = "1"
+
+[dev-dependencies]
+# Testing
+criterion = "0.5"
+mockito = "1"
+proptest = "1"
+tokio-test = "0.4"
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[[bin]]
+name = "gem2claude"
+path = "src/main.rs"

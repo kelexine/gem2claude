@@ -1,0 +1,205 @@
+// SSE event translation for streaming responses
+// Author: kelexine (https://github.com/kelexine)
+
+use crate::error::Result;
+use crate::models::gemini::GenerateContentResponse;
+use crate::models::streaming::*;
+use crate::translation::response::translate_parts;
+use tracing::debug;
+
+/// Translates Gemini streaming chunks into Anthropic SSE events
+pub struct StreamTranslator {
+    message_id: String,
+    model: String,
+    input_tokens: u32,
+    output_tokens: u32,
+    first_chunk: bool,
+    block_started: bool,
+    accumulated_text: String,
+}
+
+impl StreamTranslator {
+    pub fn new(model: String) -> Self {
+        Self {
+            message_id: format!("msg_{}", uuid::Uuid::new_v4().simple()),
+            model,
+            input_tokens: 0,
+            output_tokens: 0,
+            first_chunk: true,
+            block_started: false,
+            accumulated_text: String::new(),
+        }
+    }
+
+    /// Translate a Gemini chunk into Anthropic SSE events
+    pub fn translate_chunk(
+        &mut self,
+        gemini_chunk: GenerateContentResponse,
+    ) -> Result<Vec<StreamEvent>> {
+        let mut events = Vec::new();
+
+        // 1. On first chunk, send message_start
+        if self.first_chunk {
+            // Extract usage from first chunk
+            if let Some(wrapper) = &gemini_chunk.response {
+                if let Some(usage) = &wrapper.usage_metadata {
+                    self.input_tokens = usage.prompt_token_count.unwrap_or(0);
+                    self.output_tokens = usage.candidates_token_count.unwrap_or(0);
+                }
+            }
+
+            events.push(StreamEvent::MessageStart {
+                message: MessageStart {
+                    id: self.message_id.clone(),
+                    message_type: "message".to_string(),
+                    role: "assistant".to_string(),
+                    content: vec![],
+                    model: self.model.clone(),
+                    stop_reason: None,
+                    stop_sequence: None,
+                    usage: crate::models::anthropic::Usage {
+                        input_tokens: self.input_tokens,
+                        output_tokens: 0,
+                    },
+                },
+            });
+
+            self.first_chunk = false;
+        }
+
+        // 2. Extract text from response
+        if let Some(wrapper) = gemini_chunk.response {
+            if let Some(candidate) = wrapper.candidates.into_iter().next() {
+                // Get text from parts
+                if let Some(part) = candidate.content.parts.first() {
+                    if let crate::models::gemini::Part::Text { text } = part {
+                        // Strip thinking artifacts
+                        let clean_text = strip_thinking(text);
+                        
+                        if !clean_text.is_empty() {
+                            // 3. On first text, send content_block_start
+                            if !self.block_started {
+                                events.push(StreamEvent::ContentBlockStart {
+                                    index: 0,
+                                    content_block: ContentBlockStart::Text {
+                                        text: String::new(),
+                                    },
+                                });
+                                self.block_started = true;
+                            }
+
+                            // 4. Calculate delta
+                            let delta = if clean_text.starts_with(&self.accumulated_text) {
+                                clean_text[self.accumulated_text.len()..].to_string()
+                            } else {
+                                // Full text if not incremental
+                                clean_text.clone()
+                            };
+
+                            if !delta.is_empty() {
+                                events.push(StreamEvent::ContentBlockDelta {
+                                    index: 0,
+                                    delta: Delta::TextDelta { text: delta },
+                                });
+                            }
+
+                            self.accumulated_text = clean_text;
+                        }
+                    }
+                }
+
+                // Check if this is the final chunk
+                if let Some(finish_reason) = candidate.finish_reason {
+                    debug!("Stream finished with reason: {}", finish_reason);
+
+                    // Update output tokens from usage
+                    if let Some(usage) = wrapper.usage_metadata {
+                        self.output_tokens = usage.candidates_token_count.unwrap_or(0);
+                    }
+
+                    // 5. Send content_block_stop
+                    if self.block_started {
+                        events.push(StreamEvent::ContentBlockStop { index: 0 });
+                    }
+
+                    // 6. Send message_delta with stop_reason and usage
+                    let stop_reason = match finish_reason.as_str() {
+                        "STOP" => Some("end_turn".to_string()),
+                        "MAX_TOKENS" => Some("max_tokens".to_string()),
+                        _ => None,
+                    };
+
+                    events.push(StreamEvent::MessageDelta {
+                        delta: MessageDeltaData {
+                            stop_reason,
+                            stop_sequence: None,
+                        },
+                        usage: DeltaUsage {
+                            output_tokens: self.output_tokens,
+                        },
+                    });
+
+                    // 7. Send message_stop
+                    events.push(StreamEvent::MessageStop);
+                }
+            }
+        }
+
+        Ok(events)
+    }
+}
+
+/// Strip thinking artifacts from text
+fn strip_thinking(text: &str) -> String {
+    // Simple implementation: remove <think>...</think> tags
+    let mut result = text.to_string();
+    while let Some(start) = result.find("<think>") {
+        if let Some(end) = result.find("</think>") {
+            result = format!("{}{}", &result[..start], &result[end + 8..]);
+        } else {
+            break;
+        }
+    }
+    result.trim().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_thinking() {
+        assert_eq!(
+            strip_thinking("Hello <think>test</think> world"),
+            "Hello  world"
+        );
+        assert_eq!(strip_thinking("No thinking here"), "No thinking here");
+        assert_eq!(
+            strip_thinking("<think>all thinking</think>"),
+            ""
+        );
+    }
+
+    #[test]
+    fn test_translator_first_chunk() {
+        let mut translator = StreamTranslator::new("claude-sonnet-4-5".to_string());
+        
+        // First chunk should generate message_start
+        let chunk = GenerateContentResponse {
+            response: Some(crate::models::gemini::ResponseWrapper {
+                candidates: vec![],
+                usage_metadata: Some(crate::models::gemini::UsageMetadata {
+                    prompt_token_count: Some(10),
+                    candidates_token_count: Some(0),
+                    total_token_count: Some(10),
+                }),
+                prompt_feedback: None,
+                model_version: None,
+            }),
+        };
+
+        let events = translator.translate_chunk(chunk).unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], StreamEvent::MessageStart { .. }));
+    }
+}

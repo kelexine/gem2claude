@@ -1,0 +1,24 @@
+[server]
+host = "127.0.0.1"
+port = 8080
+workers = 4
+
+[oauth]
+credentials_path = "~/.gemini/oauth_creds.json"
+auto_refresh = true
+refresh_buffer_seconds = 300  # Refresh 5 minutes before expiry
+
+[gemini]
+api_base_url = "https://cloudcode-pa.googleapis.com/v1internal"
+default_model = "gemini-3-flash-preview"
+timeout_seconds = 300
+max_retries = 3
+
+[logging]
+level = "info"  # trace, debug, info, warn, error
+format = "pretty"  # pretty or json
+sanitize_tokens = true  # Never log sensitive tokens
+
+[performance]
+connection_pool_size = 100
+enable_compression = true

@@ -1,0 +1,36 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Configuration
+config.toml
+.env
+
+# Logs
+*.log
+logs/
+
+# OAuth credentials (never commit)
+oauth_creds.json
+.gemini/
+
+# Test artifacts
+/test-output/
+
+# Release builds
+/release/
+*.deb
+*.rpm
+*.tar.gz
+gemini-cli-0.23.0/*
+gemini-cli-0.23.0/
