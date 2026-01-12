@@ -191,7 +191,7 @@ impl GeminiClient {
         request: crate::models::gemini::GenerateContentRequest,
         model: &str,
     ) -> Result<impl futures::Stream<Item = Result<crate::models::gemini::GenerateContentResponse>> + Send> {
-        let url = format!("{}:streamGenerateContent", self.config.api_base_url);
+        let url = format!("{}:streamGenerateContent?alt=sse", self.config.api_base_url);
 
         debug!("Calling streamGenerateContent API for model: {}", model);
 

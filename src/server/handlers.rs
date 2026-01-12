@@ -163,15 +163,22 @@ async fn stream_messages_handler(
 
     // 4. Transform Gemini chunks to Anthropic SSE events
     let sse_stream = async_stream::stream! {
+        debug!("Starting SSE stream transformation");
         futures::pin_mut!(gemini_stream);
         
+        let mut chunk_count = 0;
         while let Some(chunk_result) = gemini_stream.next().await {
+            chunk_count += 1;
+            debug!("Received Gemini chunk #{}", chunk_count);
+            
             match chunk_result {
                 Ok(chunk) => {
                     // Translate chunk to events
                     match translator.translate_chunk(chunk) {
                         Ok(events) => {
-                            for event in events {
+                            debug!("Translated chunk to {} events", events.len());
+                            for (i, event) in events.iter().enumerate() {
+                                debug!("Yielding event #{}: {:?}", i, event);
                                 yield Ok::<String, std::convert::Infallible>(event.to_sse());
                             }
                         }
@@ -202,6 +209,7 @@ async fn stream_messages_handler(
                 }
             }
         }
+        debug!("SSE stream ended after {} chunks", chunk_count);
     };
 
     // 5. Convert to axum response
