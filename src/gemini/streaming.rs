@@ -10,37 +10,53 @@ use serde::Deserialize;
 use std::pin::Pin;
 use tracing::{debug, warn};
 
-/// Parse Gemini SSE stream
+/// Parse Gemini SSE stream with retry logic for initial connection
 pub async fn stream_generate_content(
     client: &Client,
     url: String,
     request_body: String,
     oauth_manager: &OAuthManager,
 ) -> Result<Pin<Box<dyn Stream<Item = Result<GenerateContentResponse>> + Send>>> {
-    let access_token = oauth_manager.get_token().await?;
-
     debug!("Starting Gemini SSE stream to: {}", url);
 
-    // Make streaming request
-    let response = client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", access_token))
-        .header("Content-Type",  "application/json")
-        .header("Accept", "text/event-stream")
-        .body(request_body)
-        .send()
-        .await?;
+    // Clone what we need for the retry closure
+    let client = client.clone();
+    let url_clone = url.clone();
+    let request_body_clone = request_body.clone();
+    let oauth_manager = oauth_manager.clone();
 
-    let status = response.status();
-    if !status.is_success() {
-        let error_text = response.text().await.unwrap_or_default();
-        return Err(ProxyError::GeminiApi(format!(
-            "HTTP {}: {}",
-            status, error_text
-        )));
-    }
+    // Retry the initial HTTP connection (handles 429 at stream start)
+    let response = crate::utils::retry::with_retry(
+        "Gemini SSE Stream",
+        || async {
+            let access_token = oauth_manager.get_token().await
+                .map_err(|e| (500u16, format!("OAuth error: {}", e)))?;
 
-    // Convert response to byte stream
+            let response = client
+                .post(&url_clone)
+                .header("Authorization", format!("Bearer {}", access_token))
+                .header("Content-Type", "application/json")
+                .header("Accept", "text/event-stream")
+                .body(request_body_clone.clone())
+                .send()
+                .await
+                .map_err(|e| (500u16, format!("HTTP error: {}", e)))?;
+
+            let status = response.status();
+            if !status.is_success() {
+                let error_text = response.text().await.unwrap_or_default();
+                return Err((status.as_u16(), error_text));
+            }
+
+            Ok(response)
+        },
+    )
+    .await
+    .map_err(|(status, error_body)| {
+        ProxyError::GeminiApi(format!("HTTP {}: {}", status, error_body))
+    })?;
+
+    // Convert response to byte stream (after successful connection)
     let byte_stream = response.bytes_stream();
 
     // Parse SSE events
