@@ -8,39 +8,43 @@
 
 `gem2claude` is a high-performance Rust proxy that enables Claude Code to work seamlessly with Google's Gemini models via OAuth authentication. If you have a Google Pro subscription with access to Gemini models but want to use Claude Code's superior terminal agent capabilities, this proxy is your solution.
 
-## ✅ Current Status
+## Current Status
 
 **Phase 3 Complete** - Full streaming support with SSE translation
 
-- ✅ OAuth credential loading from Gemini CLI
-- ✅ Project ID resolution via internal API
-- ✅ Request/Response translation (Anthropic ↔ Gemini)
-- ✅ Tool schema sanitization for Gemini compatibility
-- ✅ SSE streaming with proper Anthropic event format
-- ✅ Thinking tag stripping (`<think>` blocks filtered)
+- OAuth credential loading from Gemini CLI
+- Project ID resolution via internal API
+- Request/Response translation (Anthropic ↔ Gemini)
+- Tool schema sanitization for Gemini compatibility
+- SSE streaming with proper Anthropic event format
+- Thinking tag stripping (`<think>` blocks filtered)
 
 ## Key Features
 
-- ✅ **OAuth Integration** - Uses your existing Gemini CLI OAuth credentials
-- ✅ **Internal API Support** - Connects to Google's Cloud Code API (`cloudcode-pa.googleapis.com`)
-- ✅ **Full API Translation** - Converts between Anthropic and Gemini API formats
-- ✅ **SSE Streaming** - Real-time streaming with proper event format
-- ✅ **Tool Support** - Claude Code tools translated to Gemini function calls
-- ✅ **Production-Grade** - Enterprise-level error handling and logging
+- **OAuth Integration** - Uses your existing Gemini CLI OAuth credentials
+- **Internal API Support** - Connects to Google's Cloud Code API (`cloudcode-pa.googleapis.com`)
+- **Full API Translation** - Converts between Anthropic and Gemini API formats
+- **SSE Streaming** - Real-time streaming with proper event format
+- **Tool Support** - Claude Code tools translated to Gemini function calls
 
 ## Prerequisites
 
 Before using gem2claude, you need:
 
-1. **Google Pro Subscription** with access to Gemini models
+1. **Google Account** with access to Gemini Cli
 2. **Gemini CLI** installed and authenticated via OAuth:
    ```bash
    # Install Gemini CLI (via npm)
-   npm install -g @anthropics/gemini
+   npm install -g @google/gemini-cli
    
-   # Or install via other methods, then authenticate
+   # Or install via other methods:
+   brew install gemini-cli
+   
+   # Then authenticate
    gemini
+
    ```
+> NOTE: Choose `Login` as your authentication method
    
    This creates `~/.gemini/oauth_creds.json` which gem2claude uses.
 
@@ -150,9 +154,9 @@ gem2claude automatically maps Claude models to Gemini equivalents:
 | Claude Model | Gemini Model |
 |-------------|--------------|
 | claude-opus-4 | gemini-3-pro-preview |
-| claude-sonnet-4 | gemini-3-flash-preview |
-| claude-sonnet-4-5 | gemini-3-flash-preview |
-| claude-haiku-4 | gemini-2.5-flash-lite |
+| claude-sonnet-4 | gemini-3-pro-preview |
+| claude-sonnet-4-5 | gemini-3-pro-preview |
+| claude-haiku-4 | gemini-43flash-preview |
 
 ## Architecture
 
@@ -188,17 +192,6 @@ Google Cloud Code API
 ### "Credentials file not found"
 
 Ensure you've run `gemini` and completed the OAuth login.
-
-### "Token expired"
-
-Refresh your token:
-```bash
-gemini
-```
-
-### "429 Too Many Requests"
-
-Rate limiting from Gemini API. Wait a few seconds and retry.
 
 ### Server crashes on startup
 
@@ -243,5 +236,5 @@ MIT OR Apache-2.0
 
 ---
 
-**Author:** kelexine  
+**Author:** [kelexine](https://github.com/kelexine)
 **GitHub:** https://github.com/kelexine/gem2claude
