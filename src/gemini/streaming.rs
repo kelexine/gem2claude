@@ -86,11 +86,11 @@ where
                     debug!("Received chunk: {} bytes, content: {:?}", chunk.len(), chunk_str.chars().take(200).collect::<String>());
                     buffer.push_str(&chunk_str);
 
-                    // Process complete SSE events (delimited by \n\n)
+                    // Internal Gemini API uses CRLF line endings (\r\n\r\n), not just LF (\n\n)
                     let mut events_in_this_chunk = 0;
-                    while let Some(event_end) = buffer.find("\n\n") {
+                    while let Some(event_end) = buffer.find("\r\n\r\n") {
                         let event_data = buffer[..event_end].to_string();
-                        buffer = buffer[event_end + 2..].to_string();
+                        buffer = buffer[event_end + 4..].to_string(); // Skip 4 chars: \r\n\r\n
 
                         debug!("Found complete SSE event: {}", event_data.chars().take(100).collect::<String>());
                         
