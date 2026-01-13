@@ -10,13 +10,13 @@
 
 ## Current Status
 
-**Phase 3 Complete** - Full streaming support with SSE translation
+**Partial** - Full streaming support with SSE translation (WIP)
 
 - OAuth credential loading from Gemini CLI
 - Project ID resolution via internal API
 - Request/Response translation (Anthropic ↔ Gemini)
 - Tool schema sanitization for Gemini compatibility
-- SSE streaming with proper Anthropic event format
+- SSE streaming with proper Anthropic event format (functional but needs work)
 - Thinking tag stripping (`<think>` blocks filtered)
 
 ## Key Features
@@ -24,7 +24,7 @@
 - **OAuth Integration** - Uses your existing Gemini CLI OAuth credentials
 - **Internal API Support** - Connects to Google's Cloud Code API (`cloudcode-pa.googleapis.com`)
 - **Full API Translation** - Converts between Anthropic and Gemini API formats
-- **SSE Streaming** - Real-time streaming with proper event format
+- **SSE Streaming** - Real-time streaming with proper event format (WIP)
 - **Tool Support** - Claude Code tools translated to Gemini function calls
 
 ## Prerequisites
