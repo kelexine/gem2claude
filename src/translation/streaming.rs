@@ -141,43 +141,76 @@ impl StreamTranslator {
             self.first_chunk = false;
         }
 
-        // 2. Extract text from response
+        // 2. Extract content from response
         if let Some(wrapper) = gemini_chunk.response {
             if let Some(candidate) = wrapper.candidates.into_iter().next() {
-                // Get text from parts
-                if let Some(part) = candidate.content.parts.first() {
-                    if let crate::models::gemini::Part::Text { text } = part {
-                        // Strip thinking artifacts using stateful processor
-                        let clean_text = self.process_text_chunk(text);
-                        
-                        if !clean_text.is_empty() {
-                            // 3. On first text, send content_block_start
-                            if !self.block_started {
-                                events.push(StreamEvent::ContentBlockStart {
-                                    index: 0,
-                                    content_block: ContentBlockStart::Text {
-                                        text: String::new(),
-                                    },
-                                });
-                                self.block_started = true;
+                // Process all parts (text and function calls)
+                for part in candidate.content.parts {
+                    match part {
+                        crate::models::gemini::Part::Text { text } => {
+                            // Strip thinking artifacts using stateful processor
+                            let clean_text = self.process_text_chunk(&text);
+                            
+                            if !clean_text.is_empty() {
+                                // 3. On first text, send content_block_start
+                                if !self.block_started {
+                                    events.push(StreamEvent::ContentBlockStart {
+                                        index: 0,
+                                        content_block: ContentBlockStart::Text {
+                                            text: String::new(),
+                                        },
+                                    });
+                                    self.block_started = true;
+                                }
+
+                                // 4. Calculate delta
+                                let delta = if clean_text.starts_with(&self.accumulated_text) {
+                                    clean_text[self.accumulated_text.len()..].to_string()
+                                } else {
+                                    // Full text if not incremental
+                                    clean_text.clone()
+                                };
+
+                                if !delta.is_empty() {
+                                    events.push(StreamEvent::ContentBlockDelta {
+                                        index: 0,
+                                        delta: Delta::TextDelta { text: delta },
+                                    });
+                                }
+
+                                self.accumulated_text = clean_text;
                             }
-
-                            // 4. Calculate delta
-                            let delta = if clean_text.starts_with(&self.accumulated_text) {
-                                clean_text[self.accumulated_text.len()..].to_string()
-                            } else {
-                                // Full text if not incremental
-                                clean_text.clone()
-                            };
-
-                            if !delta.is_empty() {
-                                events.push(StreamEvent::ContentBlockDelta {
-                                    index: 0,
-                                    delta: Delta::TextDelta { text: delta },
-                                });
-                            }
-
-                            self.accumulated_text = clean_text;
+                        }
+                        crate::models::gemini::Part::FunctionCall { function_call, .. } => {
+                            // Generate tool use ID
+                            let tool_id = format!("toolu_{}", uuid::Uuid::new_v4().simple());
+                            
+                            // Send content_block_start for tool_use
+                            events.push(StreamEvent::ContentBlockStart {
+                                index: 0,
+                                content_block: ContentBlockStart::ToolUse {
+                                    id: tool_id.clone(),
+                                    name: function_call.name.clone(),
+                                },
+                            });
+                            self.block_started = true;
+                            
+                            // Convert args to JSON string and send as input_json_delta
+                            let args_json = serde_json::to_string(&function_call.args)
+                                .unwrap_or_else(|_| "{}".to_string());
+                            
+                            debug!("Translated function call: {} with args: {}", function_call.name, args_json);
+                            
+                            events.push(StreamEvent::ContentBlockDelta {
+                                index: 0,
+                                delta: Delta::InputJsonDelta {
+                                    partial_json: args_json,
+                                },
+                            });
+                        }
+                        crate::models::gemini::Part::FunctionResponse { .. } => {
+                            // Function responses are in user messages, not assistant messages
+                            // Skip for now
                         }
                     }
                 }

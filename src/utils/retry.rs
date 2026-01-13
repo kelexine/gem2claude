@@ -4,7 +4,7 @@
 use backoff::{backoff::Backoff, ExponentialBackoff};
 use serde_json::Value;
 use std::time::Duration;
-use tracing::{debug, warn};
+use tracing::{debug};
 
 /// Parse Google's retryDelay duration string (e.g., "0.457639761s", "40s")
 /// Returns duration in milliseconds, capped at 60 seconds

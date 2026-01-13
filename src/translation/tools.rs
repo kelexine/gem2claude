@@ -7,25 +7,11 @@ use crate::models::gemini::{
     FunctionCall, FunctionDeclaration, FunctionResponse, Part as GeminiPart, ToolDeclaration,
 };
 use serde_json::Value;
-use tracing::{debug, info};
+use tracing::{info};
 
 /// Translate Anthropic tools to Gemini function declarations
 /// Returns empty vec if no tools provided (important: protobuf requires valid tool_type)
 pub fn translate_tools(tools: Vec<AnthropicTool>) -> Vec<ToolDeclaration> {
-    // Log incoming tools for debugging complex schema issues
-    info!(
-        "=== INCOMING TOOLS ({} total) ===",
-        tools.len()
-    );
-    for (i, tool) in tools.iter().enumerate() {
-        if let Ok(schema_json) = serde_json::to_string_pretty(&tool.input_schema) {
-            info!(
-                "Tool[{}] '{}': schema =\n{}",
-                i, tool.name, schema_json
-            );
-        }
-    }
-    info!("=== END INCOMING TOOLS ===");
 
     // CRITICAL: Don't create empty ToolDeclaration - protobuf requires valid tool_type
     if tools.is_empty() {
@@ -41,14 +27,6 @@ pub fn translate_tools(tools: Vec<AnthropicTool>) -> Vec<ToolDeclaration> {
 /// Translate single tool
 fn translate_tool(tool: AnthropicTool) -> FunctionDeclaration {
     let sanitized_params = sanitize_schema(tool.input_schema);
-
-    // Log sanitized schema at debug level for verification
-    if let Ok(sanitized_json) = serde_json::to_string_pretty(&sanitized_params) {
-        debug!(
-            "Tool '{}' AFTER sanitization:\n{}",
-            tool.name, sanitized_json
-        );
-    }
 
     FunctionDeclaration {
         name: tool.name,
@@ -147,7 +125,6 @@ fn sanitize_format_field(value: Value) -> Value {
             if let Some(format) = map.get("format") {
                 if let Some(format_str) = format.as_str() {
                     if format_str != "enum" && format_str != "date-time" {
-                        debug!("Removing unsupported format value: {}", format_str);
                         map.remove("format");
                     }
                 }
@@ -180,13 +157,10 @@ fn sanitize_additional_properties(value: Value) -> Value {
                 if let Some(obj) = additional.as_object() {
                     if obj.is_empty() {
                         // Empty object {} -> convert to false
-                        debug!("Converting empty additionalProperties to false");
                         map.insert("additionalProperties".to_string(), Value::Bool(false));
                     } else if obj.len() == 1 && obj.contains_key("type") {
                         // Keep simple type constraints as-is
                     } else {
-                        // Complex schema in additionalProperties - simplify
-                        debug!("Simplifying complex additionalProperties schema");
                         map.insert("additionalProperties".to_string(), Value::Bool(true));
                     }
                 }
@@ -250,29 +224,29 @@ pub fn translate_tool_use(_id: String, name: String, input: Value) -> GeminiPart
     }
 }
 
-/// Translate tool result content block (Anthropic → Gemini)
+/// Translate tool result (Anthropic → Gemini FunctionResponse)
+/// Gemini expects: { functionResponse: { id, name, response: { output: "..." } } }
+/// or for errors: { functionResponse: { id, name, response: { error: "..." } } }
 pub fn translate_tool_result(
     tool_use_id: String,
+    tool_name: String,
     content: String,
     is_error: Option<bool>,
 ) -> Result<GeminiPart> {
-    // We need to track the function name from the previous tool use
-    // For now, we'll extract it from the content or use a placeholder
-    // In a real implementation, we'd maintain state to track tool calls
-
+    // Match Gemini CLI's exact format from coreToolScheduler.ts
     let response = if is_error.unwrap_or(false) {
         serde_json::json!({
             "error": content
         })
     } else {
         serde_json::json!({
-            "result": content
+            "output": content
         })
     };
 
     Ok(GeminiPart::FunctionResponse {
         function_response: FunctionResponse {
-            name: format!("tool_{}", tool_use_id), // Placeholder - need to track actual name
+            name: tool_name,
             response,
         },
     })

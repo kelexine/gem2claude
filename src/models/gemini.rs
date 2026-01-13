@@ -29,6 +29,8 @@ pub struct GenerateContentRequest {
     pub generation_config: Option<GenerationConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolDeclaration>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_config: Option<ToolConfig>,
 }
 
 /// Content in a turn (user or model)
@@ -111,6 +113,21 @@ pub struct FunctionDeclaration {
     pub description: String,
     #[serde(rename = "parametersJsonSchema")]
     pub parameters_json_schema: Value, // JSON Schema (sanitized)
+}
+
+/// Tool configuration for function calling behavior
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolConfig {
+    pub function_calling_config: FunctionCallingConfig,
+}
+
+/// Function calling configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FunctionCallingConfig {
+    /// Mode: "AUTO", "ANY", or "NONE"
+    pub mode: String,
 }
 
 /// Gemini response (with internal API wrapper)

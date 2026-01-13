@@ -80,7 +80,7 @@ pub async fn messages_handler(
     State(state): State<AppState>,
     Json(req): Json<crate::models::anthropic::MessagesRequest>,
 ) -> Result<Response, crate::error::ProxyError> {
-    use tracing::{info, debug};
+    use tracing::{info};
 
     info!(
         "Received messages request: model={}, messages={}, stream={}",
@@ -250,4 +250,29 @@ async fn stream_messages_handler(
         .header("request-id", format!("req_{}", uuid::Uuid::new_v4()))
         .body(body)
         .unwrap())
+}
+
+/// Handler for Claude Code event logging endpoint
+pub async fn event_logging_handler(
+    body: String,
+) -> impl IntoResponse {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+    
+    // Log to home directory
+    if let Some(home) = std::env::var_os("HOME") {
+        let log_path = std::path::Path::new(&home).join("claude_code_events.log");
+        
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            let timestamp = chrono::Utc::now().to_rfc3339();
+            let _ = writeln!(file, "[{}] {}", timestamp, body);
+        }
+    }
+    
+    // Return 200 OK to stop 404 spam
+    axum::http::StatusCode::OK
 }

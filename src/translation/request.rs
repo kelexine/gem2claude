@@ -50,13 +50,25 @@ pub fn translate_request(
     });
 
     // 5. Translate tools if present
-    let tools = anthropic_req.tools.map(translate_tools);
+    let tools = anthropic_req.tools.as_ref().map(|t| translate_tools(t.clone()));
+    
+    // 6. Set tool_config when tools are present (tells Gemini to wait for function responses)
+    let tool_config = if tools.is_some() {
+        Some(crate::models::gemini::ToolConfig {
+            function_calling_config: crate::models::gemini::FunctionCallingConfig {
+                mode: "AUTO".to_string(),
+            },
+        })
+    } else {
+        None
+    };
 
     debug!(
-        "Translated request: {} messages, system: {}, tools: {}",
+        "Translated request: {} messages, system: {}, tools: {}, tool_config: {}",
         contents.len(),
         system_instruction.is_some(),
-        tools.is_some()
+        tools.is_some(),
+        tool_config.is_some()
     );
 
     Ok(GenerateContentRequest {
@@ -64,53 +76,58 @@ pub fn translate_request(
         system_instruction,
         generation_config,
         tools,
+        tool_config,
     })
 }
 
 /// Translate messages array (Anthropic → Gemini)
 fn translate_messages(messages: Vec<Message>) -> Result<Vec<Content>> {
+    // Build map of tool_use_id → tool_name for FunctionResponse
+    let mut tool_id_to_name = std::collections::HashMap::new();
+    
     messages
         .into_iter()
         .map(|msg| {
-            // Map role: "assistant" → "model", "user" → "user"
+            //  Map role: "assistant" → "model", "user" → "user"
             let role = match msg.role.as_str() {
                 "user" => "user",
                 "assistant" => "model",
                 _ => {
                     return Err(ProxyError::InvalidRequest(format!(
-                        "Invalid role: {}. Must be 'user' or 'assistant'",
+                        "Invalid role: {}. Must be 'user' or 'assistant'.",
                         msg.role
                     )))
                 }
             };
 
-            let parts = translate_content(msg.content)?;
+            // Translate content, building tool name map and using it
+            let parts = match msg.content {
+                MessageContent::Text(text) => vec![GeminiPart::Text { text }],
+                MessageContent::Blocks(blocks) => {
+                    blocks
+                        .into_iter()
+                        .map(|block| translate_content_block(block, &mut tool_id_to_name))
+                        .collect::<Result<Vec<_>>>()?
+                }
+            };
 
-            Ok(Content {
-                role: role.to_string(),
-                parts,
-            })
+            Ok(Content { role: role.to_string(), parts })
         })
         .collect()
 }
 
-/// Translate message content (text or blocks)
-fn translate_content(content: MessageContent) -> Result<Vec<GeminiPart>> {
-    match content {
-        MessageContent::Text(text) => Ok(vec![GeminiPart::Text { text }]),
-        MessageContent::Blocks(blocks) => {
-            blocks.into_iter().map(translate_content_block).collect()
-        }
-    }
-}
-
 /// Translate individual content block
-fn translate_content_block(block: ContentBlock) -> Result<GeminiPart> {
+fn translate_content_block(
+    block: ContentBlock,
+    tool_id_to_name: &mut std::collections::HashMap<String, String>,
+) -> Result<GeminiPart> {
     match block {
         ContentBlock::Text { text } => Ok(GeminiPart::Text { text }),
 
         ContentBlock::ToolUse { id, name, input } => {
             debug!("Translating tool use: {}", name);
+            // Track tool name for later FunctionResponse
+            tool_id_to_name.insert(id.clone(), name.clone());
             Ok(translate_tool_use(id, name, input))
         }
 
@@ -120,7 +137,15 @@ fn translate_content_block(block: ContentBlock) -> Result<GeminiPart> {
             is_error,
         } => {
             debug!("Translating tool result for tool_use_id: {}", tool_use_id);
-            translate_tool_result(tool_use_id, content, is_error)
+            // Look up the tool name from our map
+            let tool_name = tool_id_to_name
+                .get(&tool_use_id)
+                .cloned()
+                .unwrap_or_else(|| {
+                    // Fallback if we somehow don't have the mapping
+                    format!("unknown_tool_{}", tool_use_id)
+                });
+            translate_tool_result(tool_use_id, tool_name, content, is_error)
         }
     }
 }
