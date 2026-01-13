@@ -86,48 +86,23 @@ where
                     debug!("Received chunk: {} bytes, content: {:?}", chunk.len(), chunk_str.chars().take(200).collect::<String>());
                     buffer.push_str(&chunk_str);
 
-                    // Gemini's SSE stream doesn't use standard \n\n delimiters
-                    // Events are concatenated with "data:" prefix but no separators
-                    // We need to split on "data:" to find event boundaries
+                    // Process complete SSE events (delimited by \n\n)
                     let mut events_in_this_chunk = 0;
-                    
-                    // Find all "data:" occurrences to split events
-                    loop {
-                        // Look for the next "data:" after the first one
-                        if buffer.starts_with("data:") {
-                            // Find the NEXT "data:" to determine event boundary
-                            let next_data_pos = buffer[5..].find("\ndata:");
-                            
-                            if let Some(pos) = next_data_pos {
-                                // Found next event - extract current one
-                                let event_data = buffer[..pos + 5].to_string();
-                                buffer = buffer[pos + 6..].to_string(); // Skip past "\ndata:"
-                                
-                                debug!("Extracted SSE event: {}", event_data.chars().take(100).collect::<String>());
-                                
-                                if let Some(response) = parse_sse_event(&event_data) {
-                                    events_in_this_chunk += 1;
-                                    debug!("Successfully parsed SSE event #{}, yielding response", events_in_this_chunk);
-                                    yield Ok(response);
-                                }
-                            } else {
-                                // No next "data:" found - this is the last/incomplete event
-                                // Keep it in buffer for next chunk
-                                debug!("Incomplete SSE event in buffer, waiting for more data");
-                                break;
-                            }
+                    while let Some(event_end) = buffer.find("\n\n") {
+                        let event_data = buffer[..event_end].to_string();
+                        buffer = buffer[event_end + 2..].to_string();
+
+                        debug!("Found complete SSE event: {}", event_data.chars().take(100).collect::<String>());
+                        
+                        // Parse the SSE event
+                        if let Some(response) = parse_sse_event(&event_data) {
+                            events_in_this_chunk += 1;
+                            debug!("Successfully parsed SSE event #{}, yielding response", events_in_this_chunk);
+                            yield Ok(response);
                         } else {
-                            // Buffer doesn't start with "data:", skip to next "data:"
-                            if let Some(pos) = buffer.find("\ndata:") {
-                                buffer = buffer[pos + 6..].to_string();
-                            } else {
-                                // No "data:" found at all, clear buffer
-                                debug!("No SSE event markers found in buffer");
-                                break;
-                            }
+                            debug!("Failed to parse SSE event or event was empty");
                         }
                     }
-                    
                     if events_in_this_chunk > 0 {
                         debug!("Processed {} SSE events from this HTTP chunk", events_in_this_chunk);
                     }
