@@ -34,9 +34,14 @@ pub struct GenerateContentRequest {
 /// Content in a turn (user or model)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Content {
+    #[serde(default = "default_role")]
     pub role: String, // "user" or "model"
     #[serde(default)]
     pub parts: Vec<Part>,
+}
+
+fn default_role() -> String {
+    "model".to_string()
 }
 
 /// Individual part of content

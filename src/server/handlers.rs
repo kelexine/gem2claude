@@ -239,8 +239,7 @@ async fn stream_messages_handler(
         .header("Content-Type", "text/event-stream; charset=utf-8")
         .header("Cache-Control", "no-cache")
         .header("Connection", "keep-alive")
-        .header("X-Accel-Buffering", "no") // Disable nginx buffering
-        // Crucial headers for Claude Code SDK compatibility
+        .header("X-Accel-Buffering", "no")
         .header("anthropic-version", "2023-06-01")
         .header("anthropic-ratelimit-requests-limit", "50")
         .header("anthropic-ratelimit-requests-remaining", "49")

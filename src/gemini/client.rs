@@ -176,11 +176,17 @@ impl GeminiClient {
                     return Err((status.as_u16(), error_text));
                 }
 
-                let gemini_response: crate::models::gemini::GenerateContentResponse = response
-                    .json()
-                    .await
+                let response_text = response.text().await
+                    .map_err(|e| (500, format!("Failed to read response body: {}", e)))?;
+                
+                debug!("Raw Gemini response (first 500 chars): {}", 
+                    response_text.chars().take(500).collect::<String>());
+                
+                let gemini_response: crate::models::gemini::GenerateContentResponse = 
+                    serde_json::from_str(&response_text)
                     .map_err(|e| {
                         error!("Failed to parse Gemini response: {}", e);
+                        error!("Response body: {}", response_text);
                         (500, format!("Response parsing error: {}", e))
                     })?;
 

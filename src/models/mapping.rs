@@ -6,25 +6,58 @@ use phf::phf_map;
 
 /// Compile-time perfect hash map for model mapping (zero runtime cost)
 static MODEL_MAP: phf::Map<&'static str, &'static str> = phf_map! {
-    // Latest models (Gemini 3.x Preview - late 2025 / early 2026)
-    "claude-opus-4" => "gemini-3-pro-preview",
+    // Claude 4.5 Generation (Sep-Nov 2025)
+    "claude-opus-4-5-20251101" => "gemini-3-pro-preview",
+    "claude-opus-4.5" => "gemini-3-pro-preview",
     "claude-opus-4-5" => "gemini-3-pro-preview",
+    
+    "claude-sonnet-4-5-20250929" => "gemini-3-flash-preview",
+    "claude-sonnet-4.5" => "gemini-3-flash-preview",
     "claude-sonnet-4-5" => "gemini-3-flash-preview",
-    "claude-sonnet-4" => "gemini-3-flash-preview",
-    "claude-haiku-4" => "gemini-2.5-flash",
-    "claude-haiku-4-5" => "gemini-2.5-pro",
-
-    // Previous generation (Gemini 2.5)
+    
+    "claude-haiku-4-5-20251001" => "gemini-2.5-flash",
+    "claude-haiku-4.5" => "gemini-2.5-flash",
+    "claude-haiku-4-5" => "gemini-2.5-flash",
+    
+    // Claude 4/4.1 Generation (May-Aug 2025)
+    "claude-opus-4-1-20250805" => "gemini-2.5-pro",
+    "claude-opus-4.1" => "gemini-2.5-pro",
+    "claude-opus-4-1" => "gemini-2.5-pro",
+    
+    "claude-opus-4-20250514" => "gemini-2.5-pro",
+    "claude-opus-4" => "gemini-2.5-pro",
+    
+    "claude-sonnet-4-20250514" => "gemini-2.5-flash",
+    "claude-sonnet-4" => "gemini-2.5-flash",
+    
+    // Claude 3.7 Generation (Feb 2025)
+    "claude-3-7-sonnet-20250224" => "gemini-2.5-flash",
+    "claude-3.7-sonnet" => "gemini-2.5-flash",
+    
+    // Claude 3.5 Generation (Jun-Oct 2024)
     "claude-3-5-sonnet-20241022" => "gemini-2.5-flash",
+    "claude-3-5-sonnet-20240620" => "gemini-2.5-flash",
     "claude-3-5-sonnet" => "gemini-2.5-flash",
+    "claude-3.5-sonnet" => "gemini-2.5-flash",
+    
+    "claude-3-5-haiku-20241022" => "gemini-2.5-flash-lite",
+    "claude-3-5-haiku" => "gemini-2.5-flash-lite",
+    "claude-3.5-haiku" => "gemini-2.5-flash-lite",
+    
+    // Claude 3 Generation (Mar 2024)
     "claude-3-opus-20240229" => "gemini-2.5-pro",
     "claude-3-opus" => "gemini-2.5-pro",
+    
     "claude-3-sonnet-20240229" => "gemini-2.5-flash",
     "claude-3-sonnet" => "gemini-2.5-flash",
+    
     "claude-3-haiku-20240307" => "gemini-2.5-flash-lite",
     "claude-3-haiku" => "gemini-2.5-flash-lite",
+    
+    // Legacy
+    "claude-2.1" => "gemini-2.0-flash-lite",
+    "claude-2" => "gemini-2.0-flash-lite",
 };
-
 /// Map Claude model name to Gemini model name
 pub fn map_model(claude_model: &str) -> Result<String> {
     // Claude Code often sends versioned model names with date suffixes
