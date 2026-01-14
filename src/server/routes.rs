@@ -35,6 +35,9 @@ pub fn create_router(
         .route("/health", get(health_handler))
         .route("/v1/messages", post(messages_handler))
         .route("/api/event_logging/batch", post(event_logging_handler))
+        // Allow large request bodies for base64-encoded images
+        // 7MB PNG = ~9.5MB base64, so allow up to 50MB to be safe
+        .layer(tower_http::limit::RequestBodyLimitLayer::new(50 * 1024 * 1024))
         .layer(TraceLayer::new_for_http())
         .layer(propagate_request_id)
         .layer(set_request_id)
