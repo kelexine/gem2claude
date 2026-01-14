@@ -94,7 +94,8 @@ pub enum ContentBlock {
 pub enum ImageSource {
     #[serde(rename = "base64")]
     Base64 {
-        media_type: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        media_type: Option<String>,
         data: String,
     },
 }

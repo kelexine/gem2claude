@@ -109,7 +109,7 @@ pub async fn messages_handler(
                 if let crate::models::anthropic::ContentBlock::Image { source } = block {
                     info!("🖼️  Found image in message[{}] block[{}]: {:?}", i, j, match source {
                         crate::models::anthropic::ImageSource::Base64 { media_type, .. } => 
-                            format!("base64 {}", media_type),
+                            media_type.as_ref().map(|mt| format!("base64 {}", mt)).unwrap_or_else(|| "base64 (unknown)".to_string()),
                     });
                 }
             }
