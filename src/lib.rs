@@ -1,6 +1,7 @@
 // gem2claude - OAuth-based Gemini API to Claude Code Compatible Proxy
 // Author: kelexine (https://github.com/kelexine)
 
+pub mod cache;
 pub mod config;
 pub mod error;
 pub mod gemini;

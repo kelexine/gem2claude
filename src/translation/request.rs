@@ -12,9 +12,11 @@ use crate::translation::tools::{translate_tool_result, translate_tool_use, trans
 use tracing::debug;
 
 /// Translate Anthropic MessagesRequest to Gemini GenerateContentRequest
-pub fn translate_request(
+pub async fn translate_request(
     anthropic_req: MessagesRequest,
     _project_id: &str, // Will be used when we add project-specific features
+    cache_manager: Option<&crate::cache::CacheManager>,
+    gemini_client: Option<&crate::gemini::GeminiClient>,
 ) -> Result<GenerateContentRequest> {
     debug!(
         "Translating request for model: {}",
@@ -34,14 +36,14 @@ pub fn translate_request(
     }
 
     // 3. Translate messages to contents
-    let contents = translate_messages(anthropic_req.messages)?;
+    let contents = translate_messages(anthropic_req.messages.clone())?;
 
     // 3. Translate system instruction and inject image generation limitation
     let system_instruction = {
         let mut parts = vec![];
         
         // Add original system instructions if present
-        if let Some(sys) = anthropic_req.system {
+        if let Some(ref sys) = anthropic_req.system {
             parts.push(GeminiPart::Text {
                 text: sys.to_text(),
                 thought: None,
@@ -173,13 +175,24 @@ fn translate_message_content(
     };
     
     // Filter out empty text parts (from skipped thinking blocks)
-    let filtered_parts: Vec<GeminiPart> = parts
+    let mut filtered_parts: Vec<GeminiPart> = parts
         .into_iter()
         .filter(|part| {
             !matches!(part, GeminiPart::Text { text, .. } if text.is_empty())
         })
         .collect();
-    
+
+    // Ensure we never return an empty parts list (causes HTTP 400 from Gemini API)
+    // This happens if a message contained only Thinking blocks (which are filtered out)
+    if filtered_parts.is_empty() {
+        debug!("Message content became empty after filtering (likely only Thinking blocks). Adding placeholder.");
+        filtered_parts.push(GeminiPart::Text {
+            text: " ".to_string(),
+            thought: None,
+            thought_signature: None
+        });
+    }
+
     Ok(filtered_parts)
 }
 

@@ -2,9 +2,11 @@
 // Author: kelexine (https://github.com/kelexine)
 
 mod client;
+pub mod cache_models;
 pub mod streaming;
 
 pub use client::GeminiClient;
+pub use cache_models::{CreateCachedContentRequest, CachedContentResponse};
 
 use serde::{Deserialize, Serialize};
 

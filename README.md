@@ -6,38 +6,43 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-green)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.70+-orange)](https://www.rust-lang.org/)
 
-A blazing-fast proxy that lets you use **Claude Code CLI** with Google's Gemini models through OAuth authentication. No API keys required, just your Google account, whether on free tier or Google AI Pro/Ultra Subscription.
+A blazing-fast proxy that lets you use **Claude Code** with Google's Gemini models through OAuth authentication. No API keys required, just your Google account, whether on free tier or Google AI Pro/Ultra Subscription.
+
+## ✨ Features
+
+- 🆓 **Free Tier Access** — Use Gemini through Google Cloud's OAuth, no API billing
+- 📊 **Google AI Pro/Ultra Access** — Access to higher limits and latest flagship models
+- 🚀 **Full Claude Code Support** — Streaming, tool calls, vision, extended thinking
+- ⚡ **Optimized Performance** — Connection pooling, TCP keep-alive, minimal latency
+- 🧠 **Extended Thinking** — Ultrathink support with real-time streaming
+- 👁️ **Vision Support** — Image analysis (JPEG, PNG, WebP, GIF, HEIC up to 100MB)
+- 🔧 **Tool Execution** — File operations, bash commands, browser automation
+- 💾 **Context Caching** — Reduce costs and latency for repeated prompts (75-90% savings)
+- 🔒 **Secure** — OAuth with automatic token refresh, no credentials in code
 
 ## Why gem2claude?
 
-- 🆓 **Free Tier Access** — Use Gemini through Google Cloud's OAuth, no API billing
-- 📊 **Google AI Pro/Ultra Access** — Access to higher limits and Latest models
-- 🚀 **Full Claude Code Support** — Streaming, tool calls, vision, extended thinking
-- ⚡ **Optimized Performance** — Connection pooling, TCP keep-alive, minimal latency
-- 🔒 **Secure** — OAuth with automatic token refresh, no credentials in code
-
-
-## User Story (Why gem2claude?, what triggered this weird idea?)
-
 > [!NOTE]
 > **Project Goal: Gemini-to-Claude API Bridge**
-> so, here's the deal, i have a Google Pro plan from last year, which as you know gives you access to google's latest models (including flagship models like the all new Gemini 3 pro/flash), so i want to use AI agents in my local terminal which both tools already provides, but the problem is.
-> 1. Google's Gemini cli is not cutting it for me, and i've heard claude code is the king of terminal agents, plus it's vast tool liberary, plugins and to crown it all community support (lead by Anthropic itself).
-> 2. Claude Code requires either a paid plan or api subscription which are Costly (although worth it), and since i already have a gemini pro plan buying api access or a paid plan on claude will, burn a hole in my pocket (yes am that broke) and Is kinda a waste of money since i will be paying twice.
-> 
-> so here's where my idea comes in, Claude code already supports routing api calls to custom endpoints, my plan: Create a tool that serves a claude code compatible api endpoint and routes the api call to Googles gemini api via OAuth (not the traditional generative api endpoint), the tool will connect to the same endpoint that Gemini Code Assist or Gemini CLI uses when authenticated via OAuth (again not the traditional generative api endpoint).
+>
+> So, here's the deal: I have a Google Pro plan from last year, which gives you access to Google's latest models (including flagship models like the all-new Gemini 3 Pro/Flash). I want to use AI agents in my local terminal, but the problem is:
+>
+> 1. Google's Gemini CLI is not cutting it for me, and I've heard Claude Code is the king of terminal agents, plus it has a vast tool library, plugins, and community support (led by Anthropic itself).
+> 2. Claude Code requires either a paid plan or API subscription which are costly (although worth it), and since I already have a Gemini Pro plan, buying API access or a paid plan on Claude would burn a hole in my pocket (yes, I am that broke) and is kind of a waste of money since I'd be paying twice.
+>
+> So here's where my idea comes in: Claude Code already supports routing API calls to custom endpoints. My plan: Create a tool that serves a Claude Code-compatible API endpoint and routes the API call to Google's Gemini API via OAuth (not the traditional generative API endpoint). The tool connects to the same endpoint that Gemini Code Assist or Gemini CLI uses when authenticated via OAuth.
 
-## Supported Models
+## 📋 Supported Models
 
-| Claude Model | Gemini Backend | Best For |
-|--------------|----------------|----------|
-| `claude-opus-4-5` | `gemini-3-pro-preview` | Complex reasoning, analysis |
-| `claude-sonnet-4-5` | `gemini-3-pro-preview` | Coding & Code Review |
-| `claude-haiku-4-5` | `gemini-3-flash-preview` | Fastest responses |
+| Claude Model | Gemini Backend | Context Caching | Best For |
+|--------------|----------------|-----------------|----------|
+| `claude-opus-4-5` | `gemini-3-pro-preview` | ✅ | Complex reasoning, analysis |
+| `claude-sonnet-4-5` | `gemini-3-pro-preview` | ✅ | Coding & code review |
+| `claude-haiku-4-5` | `gemini-3-flash-preview` | ✅ | Fastest responses |
 
-## Quick Start
+## 🚀 Quick Start
 
-### 1. Build
+### 1. Build from Source
 
 ```bash
 git clone https://github.com/kelexine/gem2claude
@@ -49,29 +54,29 @@ cargo build --release
 
 You need OAuth credentials from [Gemini CLI](https://github.com/google-gemini/gemini-cli).
 
-Install globally with npm:
+**Install Gemini CLI:**
 
+With npm:
 ```bash
 npm install -g @google/gemini-cli@latest
 ```
 
-Install globally with Homebrew (macOS/Linux):
-
+With Homebrew (macOS/Linux):
 ```bash
 brew install gemini-cli
 ```
 
-Login & Authenticate:
+**Authenticate:**
 ```bash
 gemini
 ```
--  Choose Login with Google
--  Choose the account you want to use
--  Follow the instructions to authenticate
+- Choose "Login with Google"
+- Select the account you want to use
+- Follow the authentication flow
 
-After authenticating with Gemini CLI, `~/.gemini/oauth_creds.json` will automatically be created.
+After authenticating, `~/.gemini/oauth_creds.json` will be created automatically.
 
-### 3. Run
+### 3. Run the Proxy
 
 ```bash
 ./target/release/gem2claude
@@ -88,89 +93,156 @@ export ANTHROPIC_AUTH_TOKEN="dummy"
 
 Add to `~/.bashrc` or `~/.zshrc` for persistence.
 
-## Features
+## 🎯 Key Features
 
 ### Extended Thinking (Ultrathink)
 
 Use Claude Code's `ultrathink` command for step-by-step reasoning:
 
 ```
-❯ ultrathink: explain this codebase
+❯ ultrathink: explain this codebase architecture
 ```
 
-The proxy translates Claude's thinking blocks to Gemini's native thinking feature.
+The proxy translates Claude's thinking blocks to Gemini's native thinking feature and streams them in real-time.
 
 ### Vision Support
 
-Analyze images directly:
+Analyze images directly in your conversations:
 
 ```bash
 claude "What's in this image? @screenshot.png"
 ```
 
-Supports JPEG, PNG, WebP, GIF, HEIC up to 100MB.
+Supports JPEG, PNG, WebP, GIF, HEIC up to 100MB. The proxy handles base64 encoding and MIME type detection automatically.
+
+### Context Caching (NEW!)
+
+Reduce costs by 75-90% on repeated prompts:
+
+```bash
+# Enable caching
+export ENABLE_CONTEXT_CACHING=true
+
+# First request creates cache
+claude "Review this large codebase @src/**/*.rs"
+
+# Subsequent requests hit cache (90% cost reduction)
+claude "Now check for security issues"
+```
+
+Cache automatically expires after 5 minutes.
 
 ### Agentic Tool Calls
 
-Full support for Claude Code's tools:
+Full support for Claude Code's tool ecosystem:
 - File read/write operations
 - Bash command execution
 - Browser automation (via Claude Code's browser tool)
 - Multi-turn conversations with tool results
+- Automatic thought signature management for Gemini 3.x
 
-## Architecture
-
-```
-Claude Code CLI
-      │
-      ▼
-┌─────────────────┐
-│   gem2claude    │
-│   (Rust Proxy)  │
-├─────────────────┤
-│ • Request Translation │
-│ • SSE Streaming       │
-│ • OAuth Management    │
-│ • Thinking Support    │
-└─────────────────┘
-      │
-      ▼
-Google Gemini API
-
-```
-
-## Performance Optimizations
-
-- **Connection Pooling** — 10 idle connections kept warm per host
-- **TCP Keep-Alive** — 60-second intervals prevent drops
-- **TCP_NODELAY** — Nagle's algorithm disabled for low latency
-- **90s Idle Timeout** — Connections reused between requests
-- **Minimal Logging** — Hot path optimized for speed
-
-## Configuration
+## ⚙️ Configuration
 
 Optional environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GEM2CLAUDE_PORT` | `8080` | Proxy port |
+| `GEM2CLAUDE_PORT` | `8080` | Proxy server port |
 | `RUST_LOG` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
+| `ENABLE_CONTEXT_CACHING` | `false` | Enable context caching for cost savings |
 
-## Troubleshooting
+## 🏗️ Architecture
 
+```
+Claude Code CLI
+      │
+      ▼
+┌────────────────────┐
+│    gem2claude      │
+│   (Rust Proxy)     │
+├────────────────────┤
+│ • Request Translation │
+│ • SSE Streaming       │
+│ • OAuth Management    │
+│ • Extended Thinking   │
+│ • Context Caching     │
+│ • Vision Processing   │
+└────────────────────┘
+      │
+      ▼
+Google Gemini API
+(cloudcode-pa.googleapis.com)
+```
+
+## ⚡ Performance Optimizations
+
+The proxy is built for performance:
+
+- **Connection Pooling** — 10 idle connections kept warm per host
+- **TCP Keep-Alive** — 60-second intervals prevent connection drops
+- **TCP_NODELAY** — Nagle's algorithm disabled for low latency
+- **90s Idle Timeout** — Connections reused between requests
+- **Minimal Logging** — Hot path optimized for speed
+- **Immediate SSE Flushing** — Real-time streaming with keepalive comments
+- **SHA256 Cache Keys** — Fast in-memory cache lookups
+
+## 🔧 Troubleshooting
 
 ### Connection Issues
-Check that the proxy is running and `ANTHROPIC_BASE_URL` is set correctly.
+
+Check that the proxy is running and `ANTHROPIC_BASE_URL` is set correctly:
+
+```bash
+curl http://localhost:8080/health
+```
 
 ### Debug Mode
+
+Enable detailed logging:
+
 ```bash
 RUST_LOG=debug ./target/release/gem2claude
 ```
 
-## License
+### Rate Limiting
+
+If you hit Gemini API quota limits, the proxy will return HTTP 429 with details:
+
+```
+Error: Gemini API quota exceeded: Resource exhausted (quota)
+```
+
+Wait a moment and retry, or use a different model.
+
+## 🤝 Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## 📄 License
 
 Apache 2.0 — See [LICENSE](LICENSE)
 
-## Author
+## 💖 Support
+
+If you find this project useful, consider supporting its development:
+
+- ⭐ Star this repository
+- 🐛 Report issues and suggest features
+- 💵 [Buy me a coffee](https://buymeacoffee.com/kelexine)
+- 💰 [Sponsor on GitHub](https://github.com/sponsors/kelexine)
+
+## 👤 Author
 
 **kelexine** — [GitHub](https://github.com/kelexine)
+
+## 🙏 Acknowledgments
+
+- [Google Gemini CLI](https://github.com/google-gemini/gemini-cli) — For OAuth implementation reference
+- [Anthropic Claude](https://www.anthropic.com/) — For the amazing Claude Code CLI
+- The Rust community for excellent tooling and libraries
+
+---
+
+**Star History**
+
+[![Star History Chart](https://api.star-history.com/svg?repos=kelexine/gem2claude&type=Date)](https://star-history.com/#kelexine/gem2claude&Date)

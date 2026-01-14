@@ -238,7 +238,56 @@ impl GeminiClient {
         )
         .await
     }
+
+    /// Create a cached content entry via Gemini API
+    /// Returns the cache name (e.g., "cachedContents/abc123")
+    pub async fn create_cache(
+        &self,
+        model: &str,
+        system_instruction: Option<crate::models::gemini::SystemInstruction>,
+        contents: Vec<crate::models::gemini::Content>,
+    ) -> Result<String> {
+        use crate::gemini::cache_models::{CreateCachedContentRequest, CachedContentResponse};
+
+        let url = format!("{}/cachedContents", self.config.api_base_url.trim_end_matches("/v1internal"));
+        
+        debug!("Creating cache for model: {}", model);
+
+        let request = CreateCachedContentRequest {
+            model: model.to_string(),
+            system_instruction,
+            contents,
+            ttl: Some("300s".to_string()),  // 5 minutes
+        };
+
+        let access_token = self.oauth_manager.get_token().await?;
+
+        let response = self.http_client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| ProxyError::GeminiApi(format!("Cache creation request failed: {}", e)))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            error!("Cache creation failed: HTTP {} - {}", status, error_text);
+            return Err(ProxyError::GeminiApi(format!("HTTP {}: {}", status, error_text)));
+        }
+
+        let cache_response: CachedContentResponse = response
+            .json()
+            .await
+            .map_err(|e| ProxyError::GeminiApi(format!("Invalid cache response: {}", e)))?;
+
+        debug!("Cache created: {}", cache_response.name);
+        Ok(cache_response.name)
+    }
 }
+
 
 #[cfg(test)]
 mod tests {

@@ -145,7 +145,9 @@ async fn non_stream_messages_handler(
 
     // 1. Translate Anthropic request to Gemini format
     let gemini_model = crate::models::mapping::map_model(&req.model)?;
-    let gemini_req = translate_request(req.clone(), state.gemini_client.project_id())?;
+    let cache_manager_ref = state.cache_manager.as_ref().map(|arc| arc.as_ref());
+    let gemini_client_ref = Some(state.gemini_client.as_ref());
+    let gemini_req = translate_request(req.clone(), state.gemini_client.project_id(), cache_manager_ref, gemini_client_ref).await?;
     
     debug!("Translated request to Gemini format");
 
@@ -189,7 +191,9 @@ async fn stream_messages_handler(
 
     // 1. Translate request
     let gemini_model = crate::models::mapping::map_model(&req.model)?;
-    let gemini_req = translate_request(req.clone(), state.gemini_client.project_id())?;
+    let cache_manager_ref = state.cache_manager.as_ref().map(|arc| arc.as_ref());
+    let gemini_client_ref = Some(state.gemini_client.as_ref());
+    let gemini_req = translate_request(req.clone(), state.gemini_client.project_id(), cache_manager_ref, gemini_client_ref).await?;
 
     // 2. Start Gemini stream
     let gemini_stream = state.gemini_client
