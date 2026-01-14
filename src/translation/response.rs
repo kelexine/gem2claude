@@ -95,13 +95,19 @@ fn translate_part(part: GeminiPart) -> Result<ContentBlock> {
     match part {
         GeminiPart::Text { text } => Ok(ContentBlock::Text { text }),
 
-        GeminiPart::InlineData { .. } => {
-            // Images are not streamed in chunks, they appear complete
-            // When Gemini sends images back, we can translate them
-            // For now, skip (images in responses are rare)
-            Err(ProxyError::InvalidRequest(
-                "Image responses not yet supported".to_string()
-            ))
+        GeminiPart::InlineData { inline_data } => {
+            // Gemini can generate images (Imagen) - translate to Claude Image format
+            use crate::models::anthropic::ImageSource;
+            
+            tracing::info!("Translating Gemini-generated image: {} ({} bytes)", 
+                inline_data.mime_type, inline_data.data.len());
+            
+            Ok(ContentBlock::Image {
+                source: ImageSource::Base64 {
+                    media_type: Some(inline_data.mime_type.clone()),
+                    data: inline_data.data.clone(),
+                }
+            })
         }
 
         GeminiPart::FunctionCall { function_call, .. } => {
