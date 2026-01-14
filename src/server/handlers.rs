@@ -86,8 +86,8 @@ pub async fn messages_handler(
     // Log raw request for debugging
     debug!("Raw request received");
 
-    info!(
-        "📥 Incoming request: model={}, messages={}, stream={}",
+    debug!(
+        "Request: {} | {} msgs | stream={}",
         req.model,
         req.messages.len(),
         req.stream.unwrap_or(false)
@@ -118,7 +118,7 @@ pub async fn messages_handler(
         if let crate::models::anthropic::MessageContent::Blocks(blocks) = &msg.content {
             for (j, block) in blocks.iter().enumerate() {
                 if let crate::models::anthropic::ContentBlock::Image { source, .. } = block {
-                    info!("🖼️  Found image in message[{}] block[{}]: {:?}", i, j, match source {
+                    debug!("Image in msg[{}] block[{}]: {:?}", i, j, match source {
                         crate::models::anthropic::ImageSource::Base64 { media_type, .. } => 
                             media_type.as_ref().map(|mt| format!("base64 {}", mt)).unwrap_or_else(|| "base64 (unknown)".to_string()),
                     });

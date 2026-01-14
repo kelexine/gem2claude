@@ -7,14 +7,14 @@ use crate::models::gemini::{
     FunctionCall, FunctionDeclaration, FunctionResponse, Part as GeminiPart, ToolDeclaration,
 };
 use serde_json::Value;
-use tracing::{info};
+use tracing::{debug};
 
 /// Translate Anthropic tools to Gemini function declarations
 pub fn translate_tools(tools: Vec<AnthropicTool>) -> Vec<ToolDeclaration> {
 
     // CRITICAL: Don't create empty ToolDeclaration - protobuf requires valid tool_type
     if tools.is_empty() {
-        info!("No tools provided, returning empty vec");
+        debug!("No tools provided, returning empty vec");
         return vec![];
     }
 
@@ -211,7 +211,7 @@ pub fn translate_tool_use(id: String, name: String, input: Value) -> GeminiPart 
     // Try to retrieve the original thoughtSignature that Gemini sent with this function call
     let thought_signature = match get_signature(&id) {
         Some(sig) => {
-            info!("Using stored thoughtSignature for tool_use_id: {} (sig length: {})", id, sig.len());
+            debug!("Using stored thoughtSignature for tool_use_id: {} (sig length: {})", id, sig.len());
             Some(sig)
         }
         None => {
