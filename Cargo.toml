@@ -14,7 +14,7 @@ categories = ["command-line-utilities", "web-programming"]
 # Web Framework
 axum = { version = "0.7", features = ["macros"] }
 tower = "0.4"
-tower-http = { version = "0.5", features = ["trace", "cors", "compression-gzip", "request-id", "util"] }
+tower-http = { version = "0.5", features = ["trace", "cors", "compression-gzip", "request-id", "util", "limit"] }
 
 # Async Runtime
 tokio = { version = "1", features = ["full"] }
