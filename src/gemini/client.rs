@@ -201,7 +201,11 @@ impl GeminiClient {
         )
         .await
         .map_err(|(status, error_body)| {
-            ProxyError::GeminiApi(format!("HTTP {}: {}", status, error_body))
+            if status == 429 {
+                ProxyError::TooManyRequests(format!("Gemini API quota exceeded: {}", error_body))
+            } else {
+                ProxyError::GeminiApi(format!("HTTP {}: {}", status, error_body))
+            }
         })
     }
 

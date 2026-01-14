@@ -49,6 +49,9 @@ pub enum ProxyError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+
+    #[error("Rate limit exceeded: {0}")]
+    TooManyRequests(String),
 }
 
 // Convert ProxyError to HTTP responses for Axum
@@ -60,6 +63,9 @@ impl IntoResponse for ProxyError {
             }
             ProxyError::InvalidRequest(_) => {
                 (StatusCode::BAD_REQUEST, "invalid_request_error", self.to_string())
+            }
+            ProxyError::TooManyRequests(_) => {
+                (StatusCode::TOO_MANY_REQUESTS, "rate_limit_error", self.to_string())
             }
             ProxyError::Config(_) | ProxyError::ConfigParsing(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "configuration_error", self.to_string())
