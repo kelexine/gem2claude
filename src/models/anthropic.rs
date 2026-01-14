@@ -180,6 +180,15 @@ pub struct MessagesResponse {
 pub struct Usage {
     pub input_tokens: u32,
     pub output_tokens: u32,
+    #[serde(skip_serializing_if = "is_zero", default)]
+    pub cache_creation_input_tokens: u32,
+    #[serde(skip_serializing_if = "is_zero", default)]
+    pub cache_read_input_tokens: u32,
+}
+
+/// Helper function to skip serializing zero values
+fn is_zero(val: &u32) -> bool {
+    *val == 0
 }
 
 impl MessagesResponse {

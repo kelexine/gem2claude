@@ -31,6 +31,8 @@ pub struct GenerateContentRequest {
     pub tools: Option<Vec<ToolDeclaration>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_config: Option<ToolConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached_content: Option<String>,  // NEW: Cache name reference
 }
 
 /// Content in a turn (user or model)
@@ -209,4 +211,6 @@ pub struct UsageMetadata {
     pub candidates_token_count: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_token_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached_content_token_count: Option<u32>,  // NEW: Cached tokens
 }

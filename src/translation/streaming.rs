@@ -185,6 +185,8 @@ impl StreamTranslator {
                     usage: crate::models::anthropic::Usage {
                         input_tokens: self.input_tokens,
                         output_tokens: 0,
+                        cache_creation_input_tokens: 0,
+                        cache_read_input_tokens: 0,
                     },
                 },
             });

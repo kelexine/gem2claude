@@ -127,6 +127,7 @@ pub fn translate_request(
         generation_config,
         tools,
         tool_config,
+        cached_content: None,  // NEW: Will be populated by cache manager
     })
 }
 
