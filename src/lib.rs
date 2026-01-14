@@ -9,3 +9,4 @@ pub mod oauth;
 pub mod server;
 pub mod translation;
 pub mod utils;
+pub mod vision;

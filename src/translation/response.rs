@@ -95,6 +95,15 @@ fn translate_part(part: GeminiPart) -> Result<ContentBlock> {
     match part {
         GeminiPart::Text { text } => Ok(ContentBlock::Text { text }),
 
+        GeminiPart::InlineData { .. } => {
+            // Images are not streamed in chunks, they appear complete
+            // When Gemini sends images back, we can translate them
+            // For now, skip (images in responses are rare)
+            Err(ProxyError::InvalidRequest(
+                "Image responses not yet supported".to_string()
+            ))
+        }
+
         GeminiPart::FunctionCall { function_call, .. } => {
             debug!("Translating function call: {}", function_call.name);
             Ok(ContentBlock::ToolUse {
@@ -205,8 +214,9 @@ mod tests {
         let function_part = GeminiPart::FunctionCall {
             function_call: FunctionCall {
                 name: "get_weather".to_string(),
-                args: serde_json::json!({"location": "NYC"}),
+                args: serde_json::json!({"city": "London"}),
             },
+            thought_signature: None,
         };
 
         let result = translate_part(function_part).unwrap();

@@ -72,6 +72,9 @@ pub enum ContentBlock {
     Text {
         text: String,
     },
+    Image {
+        source: ImageSource,
+    },
     ToolUse {
         id: String,
         name: String,
@@ -84,6 +87,20 @@ pub enum ContentBlock {
         is_error: Option<bool>,
     },
 }
+
+/// Image source for vision content
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum ImageSource {
+    #[serde(rename = "base64")]
+    Base64 {
+        media_type: String,
+        data: String,
+    },
+}
+
+/// Image block convenience type
+pub type ImageBlock = ContentBlock;
 
 /// Tool definition
 #[derive(Debug, Clone, Serialize, Deserialize)]

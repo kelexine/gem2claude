@@ -124,6 +124,12 @@ fn translate_content_block(
     match block {
         ContentBlock::Text { text } => Ok(GeminiPart::Text { text }),
 
+        ContentBlock::Image { .. } => {
+            // Translate image block to Gemini InlineData
+            let inline_data = crate::vision::translate_image_block(&block)?;
+            Ok(GeminiPart::InlineData { inline_data })
+        }
+
         ContentBlock::ToolUse { id, name, input } => {
             debug!("Translating tool use: {}", name);
             // Track tool name for later FunctionResponse

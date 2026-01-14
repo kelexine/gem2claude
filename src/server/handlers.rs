@@ -78,9 +78,22 @@ pub async fn health_handler(State(state): State<AppState>) -> Json<HealthRespons
 /// Handler for /v1/messages endpoint (Anthropic Messages API compatible)
 pub async fn messages_handler(
     State(state): State<AppState>,
-    Json(req): Json<crate::models::anthropic::MessagesRequest>,
+    body: String,  // Get raw JSON as string first
 ) -> Result<Response, crate::error::ProxyError> {
-    use tracing::{info};
+    use tracing::{info, debug};
+
+    // Log raw request for debugging
+    debug!("Raw request JSON (first 500 chars): {}", 
+        if body.len() > 500 { &body[..500] } else { &body });
+
+    // Manually deserialize to get better error messages
+    let req: crate::models::anthropic::MessagesRequest = serde_json::from_str(&body)
+        .map_err(|e| {
+            tracing::error!("Failed to deserialize request: {}", e);
+            tracing::error!("Raw body (first 1000 chars): {}", 
+                if body.len() > 1000 { &body[..1000] } else { &body });
+            crate::error::ProxyError::InvalidRequest(format!("JSON deserialization error: {}", e))
+        })?;
 
     info!(
         "Received messages request: model={}, messages={}, stream={}",
@@ -88,6 +101,20 @@ pub async fn messages_handler(
         req.messages.len(),
         req.stream.unwrap_or(false)
     );
+
+    // Debug: Check for image content
+    for (i, msg) in req.messages.iter().enumerate() {
+        if let crate::models::anthropic::MessageContent::Blocks(blocks) = &msg.content {
+            for (j, block) in blocks.iter().enumerate() {
+                if let crate::models::anthropic::ContentBlock::Image { source } = block {
+                    info!("🖼️  Found image in message[{}] block[{}]: {:?}", i, j, match source {
+                        crate::models::anthropic::ImageSource::Base64 { media_type, .. } => 
+                            format!("base64 {}", media_type),
+                    });
+                }
+            }
+        }
+    }
 
     // Check if streaming is requested
     if req.stream.unwrap_or(false) {

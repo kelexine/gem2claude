@@ -53,6 +53,10 @@ pub enum Part {
     Text {
         text: String,
     },
+    InlineData {
+        #[serde(rename = "inlineData")]
+        inline_data: InlineData,
+    },
     FunctionCall {
         #[serde(rename = "functionCall")]
         function_call: FunctionCall,
@@ -64,6 +68,14 @@ pub enum Part {
         #[serde(rename = "functionResponse")]
         function_response: FunctionResponse,
     },
+}
+
+/// Inline image data for vision
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InlineData {
+    #[serde(rename = "mimeType")]
+    pub mime_type: String,
+    pub data: String, // base64 encoded
 }
 
 /// System instruction

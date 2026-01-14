@@ -181,6 +181,10 @@ impl StreamTranslator {
                                 self.accumulated_text = clean_text;
                             }
                         }
+                        crate::models::gemini::Part::InlineData { .. } => {
+                            // Images aren't streamed incrementally - they appear complete
+                            // Skip for now - handled in non-streaming responses
+                        }
                         crate::models::gemini::Part::FunctionCall { function_call, .. } => {
                             // Generate tool use ID
                             let tool_id = format!("toolu_{}", uuid::Uuid::new_v4().simple());
@@ -323,8 +327,6 @@ mod tests {
                     candidates_token_count: Some(0),
                     total_token_count: Some(10),
                 }),
-                prompt_feedback: None,
-                model_version: None,
             }),
         };
 
