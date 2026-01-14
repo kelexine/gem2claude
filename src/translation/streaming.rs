@@ -201,9 +201,48 @@ impl StreamTranslator {
                 // Process all parts (text and function calls)
                 for part in candidate.content.parts {
                     match part {
-                        crate::models::gemini::Part::Text { text } => {
-                            // Process text chunk into segments (Text vs Thinking)
-                            let segments = self.process_text_chunk(&text);
+                        crate::models::gemini::Part::Text { text, thought, thought_signature } => {
+                            // Check if this is thinking content (thought: true)
+                            if thought == Some(true) {
+                                debug!("Streaming Gemini thinking content as Claude thinking block");
+                                
+                                // Close previous block if it wasn't thinking
+                                if let Some(current) = self.current_block_type {
+                                    if current != BlockType::Thinking {
+                                        events.push(StreamEvent::ContentBlockStop { 
+                                            index: self.current_block_index 
+                                        });
+                                        self.current_block_index += 1;
+                                        self.current_block_type = None;
+                                    }
+                                }
+
+                                // Start thinking block if needed
+                                if self.current_block_type.is_none() {
+                                    events.push(StreamEvent::ContentBlockStart {
+                                        index: self.current_block_index,
+                                        content_block: ContentBlockStart::Thinking,
+                                    });
+                                    self.current_block_type = Some(BlockType::Thinking);
+                                }
+                                
+                                // Send thinking text as delta
+                                events.push(StreamEvent::ContentBlockDelta {
+                                    index: self.current_block_index,
+                                    delta: Delta::ThinkingDelta { thinking: text },
+                                });
+                                
+                                // Send signature delta if provided by Gemini
+                                if let Some(sig) = thought_signature {
+                                    events.push(StreamEvent::ContentBlockDelta {
+                                        index: self.current_block_index,
+                                        delta: Delta::SignatureDelta { signature: sig },
+                                    });
+                                }
+                            } else {
+                                // Regular text content - use existing logic
+                                // Process text chunk into segments (Text vs Thinking from <think> tags)
+                                let segments = self.process_text_chunk(&text);
                             
                             for (block_type, content) in segments {
                                 // 1. Handle block transitions
@@ -268,9 +307,10 @@ impl StreamTranslator {
                                      });
                                 }
                             }
+                            } // End else (regular text)
                         }
                         
-                        crate::models::gemini::Part::Thought { thought, .. } => {
+                        crate::models::gemini::Part::Thought { thought, thought_signature } => {
                             debug!("Streaming Gemini thought as Claude thinking block");
                             
                             // Close previous block if it wasn't thinking
@@ -298,6 +338,14 @@ impl StreamTranslator {
                                 index: self.current_block_index,
                                 delta: Delta::ThinkingDelta { thinking: thought },
                             });
+                            
+                            // Send signature delta if provided by Gemini
+                            if let Some(sig) = thought_signature {
+                                events.push(StreamEvent::ContentBlockDelta {
+                                    index: self.current_block_index,
+                                    delta: Delta::SignatureDelta { signature: sig },
+                                });
+                            }
                         }
                         
                         crate::models::gemini::Part::InlineData { .. } => {

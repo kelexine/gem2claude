@@ -23,14 +23,19 @@ impl GeminiClient {
         config: &GeminiConfig,
         oauth_manager: OAuthManager,
     ) -> Result<Self> {
+        // Configure HTTP client for optimal streaming performance
         let http_client = Client::builder()
             .timeout(Duration::from_secs(config.timeout_seconds))
-            .pool_max_idle_per_host(100)
+            .connect_timeout(Duration::from_secs(10))
+            .pool_max_idle_per_host(10)
+            .pool_idle_timeout(Duration::from_secs(90))
+            .tcp_keepalive(Some(Duration::from_secs(60)))
+            .tcp_nodelay(true)
             .use_rustls_tls()
             .build()
             .map_err(|e| ProxyError::Internal(format!("Failed to create HTTP client: {}", e)))?;
 
-        debug!("Created HTTP client with timeout: {}s", config.timeout_seconds);
+        debug!("Created HTTP client with connection pooling and keep-alive");
 
         // Resolve project ID via loadCodeAssist
         let project_id = Self::resolve_project_id(

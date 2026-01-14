@@ -69,7 +69,7 @@ fn strip_thinking_artifacts(parts: Vec<GeminiPart>) -> Result<Vec<GeminiPart>> {
     parts
         .into_iter()
         .filter_map(|part| match part {
-            GeminiPart::Text { text } => {
+            GeminiPart::Text { text, .. } => {
                 // Remove <think>...</think> tags
                 let cleaned = get_thinking_regex().replace_all(&text, "").to_string();
 
@@ -77,7 +77,7 @@ fn strip_thinking_artifacts(parts: Vec<GeminiPart>) -> Result<Vec<GeminiPart>> {
                 if cleaned.trim().is_empty() {
                     None
                 } else {
-                    Some(Ok(GeminiPart::Text { text: cleaned }))
+                    Some(Ok(GeminiPart::Text { text: cleaned, thought: None, thought_signature: None }))
                 }
             }
             other => Some(Ok(other)),
@@ -93,7 +93,7 @@ pub fn translate_parts(parts: Vec<GeminiPart>) -> Result<Vec<ContentBlock>> {
 /// Translate individual part
 fn translate_part(part: GeminiPart) -> Result<ContentBlock> {
     match part {
-        GeminiPart::Text { text } => Ok(ContentBlock::Text { text, cache_control: None }),
+        GeminiPart::Text { text, .. } => Ok(ContentBlock::Text { text, cache_control: None }),
 
         // Extended thinking - translate Gemini thought to Claude thinking block
         GeminiPart::Thought { thought, .. } => {
@@ -171,16 +171,20 @@ mod tests {
         let parts = vec![
             GeminiPart::Text {
                 text: "<think>Internal thoughts</think>Hello!".to_string(),
+                thought: None,
+                thought_signature: None,
             },
             GeminiPart::Text {
                 text: "World".to_string(),
+                thought: None,
+                thought_signature: None,
             },
         ];
 
         let cleaned = strip_thinking_artifacts(parts).unwrap();
 
         assert_eq!(cleaned.len(), 2);
-        if let GeminiPart::Text { text } = &cleaned[0] {
+        if let GeminiPart::Text { text, .. } = &cleaned[0] {
             assert!(!text.contains("<think>"));
             assert!(text.contains("Hello!"));
         }
@@ -190,6 +194,8 @@ mod tests {
     fn test_only_thinking_artifacts() {
         let parts = vec![GeminiPart::Text {
             text: "<think>Only thinking, no content</think>".to_string(),
+            thought: None,
+            thought_signature: None,
         }];
 
         let cleaned = strip_thinking_artifacts(parts).unwrap();
@@ -212,6 +218,8 @@ mod tests {
     fn test_part_translation() {
         let text_part = GeminiPart::Text {
             text: "Hello".to_string(),
+            thought: None,
+            thought_signature: None,
         };
 
         let result = translate_part(text_part).unwrap();

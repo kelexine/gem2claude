@@ -6,6 +6,7 @@ pub mod gemini;
 pub mod mapping;
 pub mod streaming;
 
-pub use anthropic::*;
-pub use gemini::*;
+pub use anthropic::{MessagesRequest, MessagesResponse, Message, MessageContent, ContentBlock, Tool, ThinkingConfig as AnthropicThinkingConfig};
+pub use gemini::{GenerateContentRequest, GenerateContentResponse, Content, Part, ThinkingConfig as GeminiThinkingConfig};
 pub use mapping::map_model;
+pub use streaming::*;

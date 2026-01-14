@@ -49,6 +49,7 @@ pub enum ContentBlockStart {
 pub enum Delta {
     TextDelta { text: String },
     ThinkingDelta { thinking: String },  // Extended thinking delta
+    SignatureDelta { signature: String }, // Thinking block signature
     InputJsonDelta { partial_json: String },
 }
 

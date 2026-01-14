@@ -1,265 +1,165 @@
 # gem2claude
 
-**Production-ready proxy to use Google's Gemini API with Claude Code CLI**
+> **Use Claude Code with Google OAuth Login** — No API key billing required
 
-> Author: [kelexine](https://github.com/kelexine)
+[![Author](https://img.shields.io/badge/Author-kelexine-blue)](https://github.com/kelexine)
+[![License](https://img.shields.io/badge/License-Apache%202.0-green)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-1.70+-orange)](https://www.rust-lang.org/)
 
-Transform your Claude Code CLI into a powerful development assistant powered by Google's Gemini models (2.5 Flash, 2.5 Pro, Gemini 3 Flash Preview, Gemini 3 Pro Preview). This proxy seamlessly translates between Anthropic's API format and Google's internal Gemini API, enabling full Claude Code functionality including **streaming responses**, **agentic tool calls**, and **vision/image analysis**.
+A blazing-fast proxy that lets you use **Claude Code CLI** with Google's Gemini models through OAuth authentication. No API keys required, just your Google account, whether on free tier or Google AI Pro/Ultra Subscription.
 
-## Features
+## Why gem2claude?
 
-### Core Capabilities
-- ****Streaming Responses** - Real-time incremental text delivery with proper SSE event handling
-- ****Agentic Tool Calls** - Full support for Claude Code's tool system (Bash, Read, Write, etc.)
-- ****Vision Support** - Analyze images (JPEG, PNG, WebP, GIF, HEIC up to 100MB)
-- ****Model Mapping** - Automatic translation from Claude model names to Gemini equivalents
-- ****OAuth Management** - Automatic token refresh and secure credential handling
-
-### Technical Features
-- ****Secure** - OAuth token management with automatic refresh
-- ****Fast** - Zero-copy streaming, connection pooling, optimized translations
-- ****Observable** - Detailed debug logging, request/response tracking
+- 🆓 **Free Tier Access** — Use Gemini through Google Cloud's OAuth, no API billing
+- 📊 **Google AI Pro/Ultra Access** — Access to higher limits and Latest models
+- 🚀 **Full Claude Code Support** — Streaming, tool calls, vision, extended thinking
+- ⚡ **Optimized Performance** — Connection pooling, TCP keep-alive, minimal latency
+- 🔒 **Secure** — OAuth with automatic token refresh, no credentials in code
 
 ## Supported Models
 
-| Claude Model | Maps To | Description |
-|-------------|---------|-------------|
-| `claude-opus-4-5` | `gemini-3-pro-preview` | Most capable, best for complex reasoning |
-| `claude-sonnet-4-5` | `gemini-3-flash-preview` | Balanced speed/intelligence |
-| `claude-haiku-4-5` | `gemini-2.5-flash` | Fast, cost-effective |
-
-All Claude Code model variants are supported (versioned names like `claude-sonnet-4-5-20250929` too).
+| Claude Model | Gemini Backend | Best For |
+|--------------|----------------|----------|
+| `claude-opus-4-5` | `gemini-3-pro-preview` | Complex reasoning, analysis |
+| `claude-sonnet-4-5` | `gemini-3-pro-preview` | Coding & Code Review |
+| `claude-haiku-4-5` | `gemini-3-flash-preview` | Fastest responses |
 
 ## Quick Start
 
-### Prerequisites
-- Rust 1.70+ (`cargo --version`)
-- Google account with Gemini API access
-- OAuth credentials from Google Cloud Console
-
-### Installation
+### 1. Build
 
 ```bash
-# Clone and build
 git clone https://github.com/kelexine/gem2claude
 cd gem2claude
 cargo build --release
+```
 
-# Set up OAuth credentials (see Configuration below)
-# Place credentials in ~/.gemini/oauth_creds.json
+### 2. Get OAuth Credentials
 
-# Run the proxy
+You need OAuth credentials from [Gemini CLI](https://github.com/google-gemini/gemini-cli).
+
+Install globally with npm:
+
+```bash
+npm install -g @google/gemini-cli@latest
+```
+
+Install globally with Homebrew (macOS/Linux):
+
+```bash
+brew install gemini-cli
+```
+
+Login & Authenticate:
+```bash
+gemini
+```
+-  Choose Login with Google
+-  Choose the account you want to use
+-  Follow the instructions to authenticate
+
+After authenticating with Gemini CLI, `~/.gemini/oauth_creds.json` will automatically be created.
+
+### 3. Run
+
+```bash
 ./target/release/gem2claude
 ```
 
-The proxy starts on `http://127.0.0.1:8080` by default.
+Proxy starts on `http://127.0.0.1:8080`
 
-### Configuration
-
-#### 1. OAuth Credentials Setup
-
-Create `~/.gemini/oauth_creds.json`:
-
-```json
-{
-  "client_id": "your-client-id.apps.googleusercontent.com",
-  "client_secret": "your-client-secret",
-  "refresh_token": "your-refresh-token",
-  "access_token": "your-access-token",
-  "token_expiry": "2026-01-14T12:00:00Z"
-}
-```
-
-**Security:** Ensure proper permissions:
-```bash
-chmod 600 ~/.gemini/oauth_creds.json
-```
-
-#### 2. Claude Code Integration
-
-Configure Claude Code to use the proxy:
+### 4. Configure Claude Code
 
 ```bash
 export ANTHROPIC_BASE_URL="http://localhost:8080"
-export ANTHROPIC_AUTH_TOKEN="dummy"  # Not used, but required by Claude Code
+export ANTHROPIC_AUTH_TOKEN="dummy"
 ```
 
-Add to your `~/.bashrc` or `~/.zshrc` for persistence.
+Add to `~/.bashrc` or `~/.zshrc` for persistence.
 
-## Usage
+## Features
 
-### Basic Conversation
+### Extended Thinking (Ultrathink)
+
+Use Claude Code's `ultrathink` command for step-by-step reasoning:
+
+```
+❯ ultrathink: explain this codebase
+```
+
+The proxy translates Claude's thinking blocks to Gemini's native thinking feature.
+
+### Vision Support
+
+Analyze images directly:
+
 ```bash
-claude "Explain how async/await works in Rust"
+claude "What's in this image? @screenshot.png"
 ```
 
-### Vision Analysis
-```bash
-claude "Describe this diagram @architecture.png"
+Supports JPEG, PNG, WebP, GIF, HEIC up to 100MB.
+
+### Agentic Tool Calls
+
+Full support for Claude Code's tools:
+- File read/write operations
+- Bash command execution
+- Browser automation (via Claude Code's browser tool)
+- Multi-turn conversations with tool results
+
+## Architecture
+
+```
+Claude Code CLI
+      │
+      ▼
+┌─────────────────┐
+│   gem2claude    │
+│   (Rust Proxy)  │
+├─────────────────┤
+│ • Request Translation │
+│ • SSE Streaming       │
+│ • OAuth Management    │
+│ • Thinking Support    │
+└─────────────────┘
+      │
+      ▼
+Google Gemini API
+
 ```
 
-### Agentic Tool Use
-```bash
-claude "Analyze this codebase and suggest improvements"
-```
+## Performance Optimizations
 
-Claude Code will automatically use tools like `Bash`, `Read`, and `Write` through the proxy.
+- **Connection Pooling** — 10 idle connections kept warm per host
+- **TCP Keep-Alive** — 60-second intervals prevent drops
+- **TCP_NODELAY** — Nagle's algorithm disabled for low latency
+- **90s Idle Timeout** — Connections reused between requests
+- **Minimal Logging** — Hot path optimized for speed
+
+## Configuration
+
+Optional environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GEM2CLAUDE_PORT` | `8080` | Proxy port |
+| `RUST_LOG` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
+
+## Troubleshooting
+
+
+### Connection Issues
+Check that the proxy is running and `ANTHROPIC_BASE_URL` is set correctly.
 
 ### Debug Mode
 ```bash
 RUST_LOG=debug ./target/release/gem2claude
 ```
 
-## How It Works
-
-```
-┌─────────────┐           ┌──────────────┐           ┌─────────────┐
-│ Claude Code │  Anthropic│  gem2claude  │  Gemini   │   Google    │
-│     CLI     │─────────▶│    Proxy     │──────────▶│  Gemini API │
-│             │   Format  │              │  Format    │  (Internal) │
-└─────────────┘           └──────────────┘           └─────────────┘
-```
-
-### Translation Pipeline
-
-1. **Request Translation**
-   - Claude model name → Gemini model
-   - Anthropic message format → Gemini contents
-   - Tool definitions → Function declarations
-   - Image blocks → InlineData (base64)
-
-2. **Streaming Response Processing**
-   - Gemini SSE stream (`\r\n\r\n` delimiters)
-   - Chunk-by-chunk translation
-   - Claude SSE events generation
-   - Real-time delivery to Claude Code
-
-3. **Tool Call Handling**
-   - Gemini FunctionCall → Claude ToolUse
-   - Tool results → FunctionResponse
-   - Proper agentic loop continuation
-
-## Advanced Configuration
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `RUST_LOG` | `info` | Logging level (`debug`, `info`, `warn`, `error`) |
-| `SERVER_PORT` | `8080` | Proxy server port |
-| `SERVER_HOST` | `127.0.0.1` | Proxy bind address |
-
-### Custom Model Mapping
-
-Edit `src/models/mapping.rs` to customize model mappings. The mapping uses compile-time perfect hashing for zero runtime overhead.
-
-## Troubleshooting
-
-### Common Issues
-
-**"OAuth token expired"**
-```bash
-# Check token expiry in ~/.gemini/oauth_creds.json
-# The proxy auto-refreshes, but initial token must be valid
-```
-
-**"No response from Gemini"**
-```bash
-# Enable debug logging
-RUST_LOG=debug ./target/release/gem2claude
-
-# Check if project resolution succeeded:
-# Look for: "Project ID resolved: parabolic-vector-jvmxc"
-```
-
-**"Image not processed"**
-```bash
-# Ensure you're asking a question about the image:
-claude "What's in this image? @photo.jpg"
-
-# Check image format (JPEG, PNG, WebP, GIF, HEIC supported)
-# Max size: 100MB
-```
-
-**Tool calls failing**
-```bash
-# Check tool result format in logs
-# Look for: "Translating tool result for tool_use_id"
-```
-
-### Debug Logging
-
-Enable comprehensive logging for debugging:
-
-```bash
-RUST_LOG=debug ./target/release/gem2claude 2>&1 | tee debug.log
-```
-
-Key log patterns:
-- `🖼️  Found image` - Vision input detected
-- `Translated function call` - Tool use happening
-- `Found complete SSE event` - Streaming chunks processed
-
-## Performance
-
-- **Streaming Latency**: ~50-150ms first chunk
-- **Translation Overhead**: <10ms p50, <50ms p99
-- **Memory Usage**: ~20MB base + streaming buffers
-- **Throughput**: Limited by Gemini API, not proxy
-
-## Development
-
-### Running Tests
-```bash
-cargo test --lib          # Unit tests
-cargo test --lib vision   # Vision module tests
-```
-
-### Building for Production
-```bash
-cargo build --release
-strip target/release/gem2claude  # Optional: reduce binary size
-```
-
-### Project Structure
-```
-gem2claude/
-├── src/
-│   ├── gemini/         # Gemini API client and streaming
-│   ├── models/         # Data structures (Anthropic, Gemini, mapping)
-│   ├── translation/    # Format translation logic
-│   ├── vision/         # Image processing (modular)
-│   ├── oauth/          # OAuth credential management
-│   ├── server/         # HTTP server and handlers
-│   └── utils/          # Retry logic, helpers
-├── Cargo.toml
-└── README.md
-```
-
-## Contributing
-
-Contributions welcome! Please:
-1. Follow Rust best practices
-2. Add tests for new features
-3. Update documentation
-4. Run `cargo fmt` and `cargo clippy`
-
 ## License
 
-[Your chosen license - MIT/Apache-2.0 recommended]
+Apache 2.0 — See [LICENSE](LICENSE)
 
-## Acknowledgments
+## Author
 
-- **Google** - Gemini API and internal API access
-- **Anthropic** - Claude Code CLI inspiration
-- **Rust Community** - Excellent async ecosystem
-
-## Disclaimer
-
-This project uses Google's **internal** Gemini API endpoint used by the official Gemini CLI. It is not an official Google or Anthropic product. Use responsibly and in accordance with Google's terms of service.
-
----
-
-**Made by [kelexine](https://github.com/kelexine)**
-
-*Transform abstract ideas into production-ready code.*
+**kelexine** — [GitHub](https://github.com/kelexine)

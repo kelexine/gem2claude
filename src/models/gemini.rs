@@ -52,6 +52,11 @@ fn default_role() -> String {
 pub enum Part {
     Text {
         text: String,
+        /// Flag indicating this is thinking content (Gemini 2.5/3.x)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        thought: Option<bool>,
+        #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
+        thought_signature: Option<String>,
     },
     /// Extended thinking/reasoning from Gemini (verified from gemini-cli source)
     Thought {
@@ -116,6 +121,23 @@ pub struct GenerationConfig {
     pub temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "thinkingConfig")]
+    pub thinking_config: Option<ThinkingConfig>,
+}
+
+/// Extended thinking configuration for Gemini models
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThinkingConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_thoughts: Option<bool>,
+    /// Token budget for thinking (Gemini 2.5)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_budget: Option<u32>,
+    /// Thinking level for Gemini 3.x: "LOW", "MEDIUM", "HIGH"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_level: Option<String>,
 }
 
 /// Tool declaration (must use camelCase for internal API)

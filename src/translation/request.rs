@@ -5,6 +5,7 @@ use crate::error::{ProxyError, Result};
 use crate::models::anthropic::{ContentBlock, Message, MessageContent, MessagesRequest};
 use crate::models::gemini::{
     Content, GenerateContentRequest, GenerationConfig, Part as GeminiPart, SystemInstruction,
+    ThinkingConfig as GeminiThinkingConfig,
 };
 use crate::models::mapping::map_model;
 use crate::translation::tools::{translate_tool_result, translate_tool_use, translate_tools};
@@ -43,25 +44,62 @@ pub fn translate_request(
         if let Some(sys) = anthropic_req.system {
             parts.push(GeminiPart::Text {
                 text: sys.to_text(),
+                thought: None,
+                thought_signature: None,
             });
         }
         
         // Inject no image generation to system instruction
         parts.push(GeminiPart::Text {
             text: "\n\nIMPORTANT: You do not have the ability to generate, create, or produce images. If the user asks you to generate, create, draw, or produce an image, politely inform them that you cannot generate images and can only analyze existing images that are provided to you.".to_string(),
+            thought: None,
+            thought_signature: None,
         });
         
         Some(SystemInstruction { parts })
     };
+    // 4. Translate thinking config if present
+    let thinking_config = anthropic_req.thinking.as_ref().and_then(|thinking| {
+        if thinking.type_ != "enabled" {
+            return None;
+        }
+        
+        // Get the mapped Gemini model name
+        // map_model returns Result<String, ProxyError>, unwrap_or falls back to original model
+        let gemini_model = crate::models::mapping::map_model(&anthropic_req.model)
+            .unwrap_or_else(|_| anthropic_req.model.clone());
+        
+        // Gemini 3.x models use thinking Level enum
+        if gemini_model.contains("gemini-3") {
+            let level = match thinking.budget_tokens {
+                0..=10_000 => "LOW",
+                10_001..=20_000 => "MEDIUM",
+                _ => "HIGH",
+            };
+            Some(GeminiThinkingConfig {
+                include_thoughts: Some(true),
+                thinking_budget: None,
+                thinking_level: Some(level.to_string()),
+            })
+        } else {
+            // Gemini 2.5 models use thinkingBudget (token count)
+            Some(GeminiThinkingConfig {
+                include_thoughts: Some(true),
+                thinking_budget: Some(thinking.budget_tokens),
+                thinking_level: None,
+            })
+        }
+    });
 
-    // 4. Build generation config
+    // 5. Build generation config
     let generation_config = Some(GenerationConfig {
         max_output_tokens: Some(max_tokens),
         temperature: anthropic_req.temperature,
         top_p: anthropic_req.top_p,
+        thinking_config,
     });
 
-    // 5. Translate tools if present
+    // 6. Translate tools if present
     let tools = anthropic_req.tools.as_ref().map(|t| translate_tools(t.clone()));
     
     // 6. Set tool_config when tools are present (tells Gemini to wait for function responses)
@@ -126,7 +164,7 @@ fn translate_message_content(
     tool_id_to_name: &mut std::collections::HashMap<String, String>,
 ) -> Result<Vec<GeminiPart>> {
     let parts = match content {
-        MessageContent::Text(text) => vec![GeminiPart::Text { text }],
+        MessageContent::Text(text) => vec![GeminiPart::Text { text, thought: None, thought_signature: None }],
         MessageContent::Blocks(blocks) => blocks
             .into_iter()
             .map(|block| translate_content_block(block, tool_id_to_name))
@@ -137,7 +175,7 @@ fn translate_message_content(
     let filtered_parts: Vec<GeminiPart> = parts
         .into_iter()
         .filter(|part| {
-            !matches!(part, GeminiPart::Text { text } if text.is_empty())
+            !matches!(part, GeminiPart::Text { text, .. } if text.is_empty())
         })
         .collect();
     
@@ -150,12 +188,12 @@ fn translate_content_block(
     tool_id_to_name: &mut std::collections::HashMap<String, String>,
 ) -> Result<GeminiPart> {
     match block {
-        ContentBlock::Text { text, .. } => Ok(GeminiPart::Text { text }),
+        ContentBlock::Text { text, .. } => Ok(GeminiPart::Text { text, thought: None, thought_signature: None }),
 
         // Skip thinking blocks - Claude's thinking is not sent to Gemini
         ContentBlock::Thinking { .. } => {
             // Return empty text to avoid breaking message structure
-            Ok(GeminiPart::Text { text: String::new() })
+            Ok(GeminiPart::Text { text: String::new(), thought: None, thought_signature: None })
         }
 
         ContentBlock::Image { .. } => {

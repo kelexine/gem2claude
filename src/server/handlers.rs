@@ -78,29 +78,40 @@ pub async fn health_handler(State(state): State<AppState>) -> Json<HealthRespons
 /// Handler for /v1/messages endpoint (Anthropic Messages API compatible)
 pub async fn messages_handler(
     State(state): State<AppState>,
-    body: String,  // Get raw JSON as string first
+    headers: axum::http::HeaderMap,
+    Json(req): Json<crate::models::anthropic::MessagesRequest>,
 ) -> Result<Response, crate::error::ProxyError> {
-    use tracing::{info, debug};
+    use tracing::{debug, info};
 
     // Log raw request for debugging
-    debug!("Raw request JSON (first 500 chars): {}", 
-        if body.len() > 500 { &body[..500] } else { &body });
-
-    // Manually deserialize to get better error messages
-    let req: crate::models::anthropic::MessagesRequest = serde_json::from_str(&body)
-        .map_err(|e| {
-            tracing::error!("Failed to deserialize request: {}", e);
-            tracing::error!("Raw body (first 1000 chars): {}", 
-                if body.len() > 5000 { &body[..5000] } else { &body });
-            crate::error::ProxyError::InvalidRequest(format!("JSON deserialization error: {}", e))
-        })?;
+    debug!("Raw request received");
 
     info!(
-        "Received messages request: model={}, messages={}, stream={}",
+        "📥 Incoming request: model={}, messages={}, stream={}",
         req.model,
         req.messages.len(),
         req.stream.unwrap_or(false)
     );
+    
+    // Log all headers for debugging
+    debug!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    debug!("📋 REQUEST HEADERS:");
+    for (name, value) in headers.iter() {
+        if let Ok(value_str) = value.to_str() {
+            debug!("  {}: {}", name, value_str);
+        }
+    }
+    debug!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    // Log request body (first 500 chars for brevity)
+    let body_json = serde_json::to_string_pretty(&req).unwrap_or_else(|_| "{}".to_string());
+    let body_preview = if body_json.len() > 500 {
+        format!("{}...\n  (truncated, {} total chars)", &body_json[..500], body_json.len())
+    } else {
+        body_json
+    };
+    debug!("📄 REQUEST BODY:\n{}", body_preview);
+    debug!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
     // Debug: Check for image content
     for (i, msg) in req.messages.iter().enumerate() {
@@ -207,10 +218,11 @@ async fn stream_messages_handler(
                                     // Translate chunk to events
                                     match translator.translate_chunk(chunk) {
                                         Ok(events) => {
-                                            debug!("Translated chunk to {} events", events.len());
-                                            for (i, event) in events.iter().enumerate() {
-                                                debug!("Yielding event #{}: {:?}", i, event);
+                                            // Hot path - minimal logging
+                                            for event in events.iter() {
                                                 yield Ok::<String, std::convert::Infallible>(event.to_sse());
+                                                // Add a comment to force client-side buffer flush
+                                                yield Ok(": keepalive\n\n".to_string());
                                             }
                                         }
                                         Err(e) => {
@@ -257,9 +269,9 @@ async fn stream_messages_handler(
     };
 
     // 5. Convert to axum response
+    // Note: SSE events already end with \n\n which should trigger chunk flush
     use axum::body::Body;
     
-    // Create body from stream
     let body = Body::from_stream(sse_stream);
     
     Ok(Response::builder()
@@ -268,6 +280,7 @@ async fn stream_messages_handler(
         .header("Cache-Control", "no-cache")
         .header("Connection", "keep-alive")
         .header("X-Accel-Buffering", "no")
+        .header("Transfer-Encoding", "chunked")
         .header("anthropic-version", "2023-06-01")
         .header("anthropic-ratelimit-requests-limit", "50")
         .header("anthropic-ratelimit-requests-remaining", "49")

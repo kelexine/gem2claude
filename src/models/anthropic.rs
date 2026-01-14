@@ -19,6 +19,8 @@ pub struct MessagesRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Tool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<ThinkingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
 }
 
@@ -194,4 +196,12 @@ impl MessagesResponse {
             usage,
         }
     }
+}
+
+/// Extended thinking configuration (Claude 4.x)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThinkingConfig {
+    #[serde(rename = "type")]
+    pub type_: String, // "enabled"
+    pub budget_tokens: u32,
 }
