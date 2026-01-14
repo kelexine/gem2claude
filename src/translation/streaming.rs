@@ -8,17 +8,32 @@ use tracing::debug;
 
 /// Translates Gemini streaming chunks into Anthropic SSE events
 /// Includes stateful thinking tag stripping to handle tags split across chunks
+#[derive(Debug, PartialEq, Clone, Copy)]
+enum BlockType {
+    Text,
+    Thinking,
+    ToolUse,
+}
+
+/// Translates Gemini streaming chunks into Anthropic SSE events
+/// Includes stateful thinking tag stripping to handle tags split across chunks
 pub struct StreamTranslator {
     message_id: String,
     model: String,
     input_tokens: u32,
     output_tokens: u32,
     first_chunk: bool,
-    block_started: bool,
+    
+    // Block state tracking
+    current_block_index: i32,
+    current_block_type: Option<BlockType>,
+    had_tool_use: bool,
+    
     accumulated_text: String,
     // Stateful thinking stripper fields
     thinking_buffer: String,
     in_thinking: bool,
+    accumulated_thinking: String,
 }
 
 impl StreamTranslator {
@@ -29,67 +44,106 @@ impl StreamTranslator {
             input_tokens: 0,
             output_tokens: 0,
             first_chunk: true,
-            block_started: false,
+            
+            current_block_index: 0,
+            current_block_type: None,
+            had_tool_use: false,
+            
             accumulated_text: String::new(),
             thinking_buffer: String::new(),
             in_thinking: false,
+            accumulated_thinking: String::new(),
         }
     }
 
     /// Process text chunk with stateful thinking tag stripping
     /// Handles tags that may be split across multiple chunks
-    fn process_text_chunk(&mut self, text: &str) -> String {
-        let mut output = String::new();
+    /// Returns a vector of (BlockType, String) tuples representing segments
+    fn process_text_chunk(&mut self, text: &str) -> Vec<(BlockType, String)> {
+        let mut segments = Vec::new();
         let mut full_text = self.thinking_buffer.clone() + text;
         self.thinking_buffer.clear();
 
-        // State machine for thinking tag removal
+        // Safety limit for buffer
+        if full_text.len() > 10 * 1024 * 1024 {
+            // Buffer too large, flush it as is to prevent OOM
+            if self.in_thinking {
+                 segments.push((BlockType::Thinking, full_text));
+            } else {
+                 segments.push((BlockType::Text, full_text));
+            }
+            return segments;
+        }
+
         loop {
             if self.in_thinking {
-                // We're inside a <think> block, look for closing tag
+                // We are inside a <think> block
                 match full_text.find("</think>") {
                     Some(idx) => {
-                        // Found closing tag, skip past it
+                        // Found closing tag
+                        let content = full_text[..idx].to_string();
+                        if !content.is_empty() {
+                            segments.push((BlockType::Thinking, content));
+                        }
+                        
                         self.in_thinking = false;
                         full_text = full_text[idx + 8..].to_string();
                         // Continue loop to process remainder
                     }
                     None => {
-                        // No closing tag yet, might be partial at end
-                        // Check for partial closing tag
+                        // No closing tag yet
+                        // Check for partial closing tag at the end
                         if let Some(partial_idx) = Self::find_partial_tag(&full_text, "</think>") {
+                            let content = full_text[..partial_idx].to_string();
+                            if !content.is_empty() {
+                                segments.push((BlockType::Thinking, content));
+                            }
                             self.thinking_buffer = full_text[partial_idx..].to_string();
+                            break;
+                        } else {
+                            // All content is thinking
+                            if !full_text.is_empty() {
+                                segments.push((BlockType::Thinking, full_text));
+                            }
+                            break;
                         }
-                        // Discard rest - it's thinking content
-                        break;
                     }
                 }
             } else {
-                // We're outside thinking block, look for opening tag
+                // We are outside a thinking block (Text)
                 match full_text.find("<think>") {
                     Some(idx) => {
-                        // Found opening tag, emit text before it
-                        output.push_str(&full_text[..idx]);
+                        // Found opening tag
+                        let content = full_text[..idx].to_string();
+                        if !content.is_empty() {
+                            segments.push((BlockType::Text, content));
+                        }
+                        
                         self.in_thinking = true;
-                        full_text = full_text[idx + 7..].to_string();
-                        // Continue loop to find closing tag
+                        full_text = full_text[idx + 7..].to_string(); // Skip <think>
                     }
                     None => {
                         // No opening tag, check for partial at end
                         if let Some(partial_idx) = Self::find_partial_tag(&full_text, "<think>") {
-                            // Move partial tag to buffer for next chunk
-                            output.push_str(&full_text[..partial_idx]);
+                            let content = full_text[..partial_idx].to_string();
+                            if !content.is_empty() {
+                                segments.push((BlockType::Text, content));
+                            }
                             self.thinking_buffer = full_text[partial_idx..].to_string();
+                            break;
                         } else {
-                            // Safe to emit all
-                            output.push_str(&full_text);
+                            // All content is text
+                            if !full_text.is_empty() {
+                                segments.push((BlockType::Text, full_text));
+                            }
+                            break;
                         }
-                        break;
                     }
                 }
             }
         }
-        output
+        
+        segments
     }
 
     /// Find partial tag match at end of string
@@ -148,74 +202,158 @@ impl StreamTranslator {
                 for part in candidate.content.parts {
                     match part {
                         crate::models::gemini::Part::Text { text } => {
-                            // Strip thinking artifacts using stateful processor
-                            let clean_text = self.process_text_chunk(&text);
+                            // Process text chunk into segments (Text vs Thinking)
+                            let segments = self.process_text_chunk(&text);
                             
-                            if !clean_text.is_empty() {
-                                // 3. On first text, send content_block_start
-                                if !self.block_started {
-                                    events.push(StreamEvent::ContentBlockStart {
-                                        index: 0,
-                                        content_block: ContentBlockStart::Text {
-                                            text: String::new(),
-                                        },
-                                    });
-                                    self.block_started = true;
+                            for (block_type, content) in segments {
+                                // 1. Handle block transitions
+                                if let Some(current) = self.current_block_type {
+                                    if current != block_type {
+                                        // Close previous block
+                                        events.push(StreamEvent::ContentBlockStop { 
+                                            index: self.current_block_index 
+                                        });
+                                        self.current_block_index += 1;
+                                        self.current_block_type = None;
+                                    }
                                 }
 
-                                // 4. Calculate delta
-                                let delta = if clean_text.starts_with(&self.accumulated_text) {
-                                    clean_text[self.accumulated_text.len()..].to_string()
-                                } else {
-                                    // Full text if not incremental
-                                    clean_text.clone()
+                                // 2. Start new block if needed
+                                if self.current_block_type.is_none() {
+                                    let content_block = match block_type {
+                                        BlockType::Text => ContentBlockStart::Text { text: String::new() },
+                                        BlockType::Thinking => ContentBlockStart::Thinking,
+                                        _ => ContentBlockStart::Text { text: String::new() }, // Should not happen
+                                    };
+
+                                    events.push(StreamEvent::ContentBlockStart {
+                                        index: self.current_block_index,
+                                        content_block,
+                                    });
+                                    self.current_block_type = Some(block_type.clone());
+                                }
+
+                                // 3. Emit delta
+                                // For text, we need to handle accumulation deduplication
+                                // For thinking, we just emit content as is (simplification)
+                                let delta_content = match block_type {
+                                    BlockType::Text => {
+                                        let full_accum = self.accumulated_text.clone() + &content;
+                                        let delta = if full_accum.starts_with(&self.accumulated_text) {
+                                            full_accum[self.accumulated_text.len()..].to_string()
+                                        } else {
+                                            content.clone()
+                                        };
+                                        self.accumulated_text = full_accum; // Update accum *after* calc
+                                        delta
+                                    },
+                                    BlockType::Thinking => {
+                                         // Simplify: just emit thinking content directly without dedup logic for now
+                                         // as thinking buffer is cleared in process_text_chunk
+                                         content
+                                    },
+                                    _ => String::new(),
                                 };
 
-                                if !delta.is_empty() {
-                                    events.push(StreamEvent::ContentBlockDelta {
-                                        index: 0,
-                                        delta: Delta::TextDelta { text: delta },
-                                    });
+                                if !delta_content.is_empty() {
+                                     let delta = match block_type {
+                                         BlockType::Text => Delta::TextDelta { text: delta_content },
+                                         BlockType::Thinking => Delta::ThinkingDelta { thinking: delta_content },
+                                         _ => Delta::TextDelta { text: String::new() },
+                                     };
+                                     
+                                     events.push(StreamEvent::ContentBlockDelta {
+                                         index: self.current_block_index,
+                                         delta, 
+                                     });
                                 }
-
-                                self.accumulated_text = clean_text;
                             }
                         }
-                        crate::models::gemini::Part::InlineData { .. } => {
-                            // Images aren't streamed incrementally - they appear complete
-                            // Skip for now - handled in non-streaming responses
+                        
+                        crate::models::gemini::Part::Thought { thought, .. } => {
+                            debug!("Streaming Gemini thought as Claude thinking block");
+                            
+                            // Close previous block if it wasn't thinking
+                            if let Some(current) = self.current_block_type {
+                                if current != BlockType::Thinking {
+                                    events.push(StreamEvent::ContentBlockStop { 
+                                        index: self.current_block_index 
+                                    });
+                                    self.current_block_index += 1;
+                                    self.current_block_type = None;
+                                }
+                            }
+
+                            // Start thinking block if needed
+                            if self.current_block_type.is_none() {
+                                events.push(StreamEvent::ContentBlockStart {
+                                    index: self.current_block_index,
+                                    content_block: ContentBlockStart::Thinking,
+                                });
+                                self.current_block_type = Some(BlockType::Thinking);
+                            }
+                            
+                            // Send thinking text as delta
+                            events.push(StreamEvent::ContentBlockDelta {
+                                index: self.current_block_index,
+                                delta: Delta::ThinkingDelta { thinking: thought },
+                            });
                         }
-                        crate::models::gemini::Part::FunctionCall { function_call, .. } => {
+                        
+                        crate::models::gemini::Part::InlineData { .. } => {
+                            // Images aren't streamed incrementally
+                        }
+                        crate::models::gemini::Part::FunctionCall { function_call, thought_signature } => {
+                            // Close any previous block
+                            if self.current_block_type.is_some() {
+                                events.push(StreamEvent::ContentBlockStop { 
+                                    index: self.current_block_index 
+                                });
+                                self.current_block_index += 1;
+                                self.current_block_type = None;
+                            }
+
+                            // Tool use is treated as atomic block for now (GEMINI sends full object)
                             // Generate tool use ID
                             let tool_id = format!("toolu_{}", uuid::Uuid::new_v4().simple());
                             
-                            // Send content_block_start for tool_use
+                            // Store the thoughtSignature
+                            if let Some(ref sig) = thought_signature {
+                                crate::translation::signature_store::store_signature(&tool_id, sig);
+                            }
+                            
+                            // Send content_block_start
                             events.push(StreamEvent::ContentBlockStart {
-                                index: 0,
+                                index: self.current_block_index,
                                 content_block: ContentBlockStart::ToolUse {
                                     id: tool_id.clone(),
                                     name: function_call.name.clone(),
                                 },
                             });
-                            self.block_started = true;
                             
-                            // Convert args to JSON string and send as input_json_delta
+                            // Send delta
                             let args_json = serde_json::to_string(&function_call.args)
                                 .unwrap_or_else(|_| "{}".to_string());
                             
                             debug!("Translated function call: {} with args: {}", function_call.name, args_json);
                             
                             events.push(StreamEvent::ContentBlockDelta {
-                                index: 0,
+                                index: self.current_block_index,
                                 delta: Delta::InputJsonDelta {
                                     partial_json: args_json,
                                 },
                             });
+
+                            // Always close tool blocks immediately since they come as full objects
+                            events.push(StreamEvent::ContentBlockStop { 
+                                index: self.current_block_index 
+                            });
+                            
+                            self.current_block_index += 1;
+                            self.current_block_type = None;
+                            self.had_tool_use = true;
                         }
-                        crate::models::gemini::Part::FunctionResponse { .. } => {
-                            // Function responses are in user messages, not assistant messages
-                            // Skip for now
-                        }
+                        crate::models::gemini::Part::FunctionResponse { .. } => {}
                     }
                 }
 
@@ -223,21 +361,27 @@ impl StreamTranslator {
                 if let Some(finish_reason) = candidate.finish_reason {
                     debug!("Stream finished with reason: {}", finish_reason);
 
-                    // Update output tokens from usage
+                    // Update output tokens
                     if let Some(usage) = wrapper.usage_metadata {
                         self.output_tokens = usage.candidates_token_count.unwrap_or(0);
                     }
 
-                    // 5. Send content_block_stop
-                    if self.block_started {
-                        events.push(StreamEvent::ContentBlockStop { index: 0 });
+                    // Close any open block
+                    if self.current_block_type.is_some() {
+                        events.push(StreamEvent::ContentBlockStop { 
+                            index: self.current_block_index 
+                        });
                     }
 
-                    // 6. Send message_delta with stop_reason and usage
-                    let stop_reason = match finish_reason.as_str() {
-                        "STOP" => Some("end_turn".to_string()),
-                        "MAX_TOKENS" => Some("max_tokens".to_string()),
-                        _ => None,
+                    // Set stop reason correctly
+                    let stop_reason = if self.had_tool_use && finish_reason == "STOP" {
+                        Some("tool_use".to_string())
+                    } else {
+                        match finish_reason.as_str() {
+                            "STOP" => Some("end_turn".to_string()),
+                            "MAX_TOKENS" => Some("max_tokens".to_string()),
+                            _ => None,
+                        }
                     };
 
                     events.push(StreamEvent::MessageDelta {
@@ -250,7 +394,6 @@ impl StreamTranslator {
                         },
                     });
 
-                    // 7. Send message_stop
                     events.push(StreamEvent::MessageStop);
                 }
             }

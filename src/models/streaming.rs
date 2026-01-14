@@ -39,6 +39,7 @@ pub struct MessageStart {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlockStart {
     Text { text: String },
+    Thinking,  // Extended thinking block
     ToolUse { id: String, name: String },
 }
 
@@ -47,6 +48,7 @@ pub enum ContentBlockStart {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Delta {
     TextDelta { text: String },
+    ThinkingDelta { thinking: String },  // Extended thinking delta
     InputJsonDelta { partial_json: String },
 }
 

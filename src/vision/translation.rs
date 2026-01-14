@@ -11,7 +11,7 @@ use base64::Engine;
 pub fn translate_image_block(block: &ContentBlock) -> Result<InlineData> {
     // Extract Image variant
     let (media_type_opt, data) = match block {
-        ContentBlock::Image { source } => match source {
+        ContentBlock::Image { source, .. } => match source {
             ImageSource::Base64 { media_type, data } => {
                 (media_type.clone(), data.clone())
             }
@@ -90,6 +90,7 @@ mod tests {
                 media_type: Some("image/png".to_string()),
                 data: png_data.to_string(),
             },
+            cache_control: None,
         };
 
         let result = translate_image_block(&image);
@@ -110,6 +111,7 @@ mod tests {
                 media_type: None,  // Missing!
                 data: png_data.to_string(),
             },
+            cache_control: None,
         };
 
         let result = translate_image_block(&image);
@@ -126,6 +128,7 @@ mod tests {
                 media_type: Some("image/bmp".to_string()), // Not supported
                 data: "dGVzdA==".to_string(),
             },
+            cache_control: None,
         };
 
         let result = translate_image_block(&image);
@@ -139,6 +142,7 @@ mod tests {
                 media_type: Some("image/png".to_string()),
                 data: "not-valid-base64!!!".to_string(),
             },
+            cache_control: None,
         };
 
         let result = translate_image_block(&image);

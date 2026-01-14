@@ -35,12 +35,24 @@ pub fn translate_request(
     // 3. Translate messages to contents
     let contents = translate_messages(anthropic_req.messages)?;
 
-    // 3. Translate system instruction
-    let system_instruction = anthropic_req.system.map(|sys| SystemInstruction {
-        parts: vec![GeminiPart::Text {
-            text: sys.to_text(),
-        }],
-    });
+    // 3. Translate system instruction and inject image generation limitation
+    let system_instruction = {
+        let mut parts = vec![];
+        
+        // Add original system instructions if present
+        if let Some(sys) = anthropic_req.system {
+            parts.push(GeminiPart::Text {
+                text: sys.to_text(),
+            });
+        }
+        
+        // Inject no image generation to system instruction
+        parts.push(GeminiPart::Text {
+            text: "\n\nIMPORTANT: You do not have the ability to generate, create, or produce images. If the user asks you to generate, create, draw, or produce an image, politely inform them that you cannot generate images and can only analyze existing images that are provided to you.".to_string(),
+        });
+        
+        Some(SystemInstruction { parts })
+    };
 
     // 4. Build generation config
     let generation_config = Some(GenerationConfig {
@@ -101,19 +113,35 @@ fn translate_messages(messages: Vec<Message>) -> Result<Vec<Content>> {
             };
 
             // Translate content, building tool name map and using it
-            let parts = match msg.content {
-                MessageContent::Text(text) => vec![GeminiPart::Text { text }],
-                MessageContent::Blocks(blocks) => {
-                    blocks
-                        .into_iter()
-                        .map(|block| translate_content_block(block, &mut tool_id_to_name))
-                        .collect::<Result<Vec<_>>>()?
-                }
-            };
+            let parts = translate_message_content(msg.content, &mut tool_id_to_name)?;
 
             Ok(Content { role: role.to_string(), parts })
         })
         .collect()
+}
+
+/// Translate individual message content (Anthropic → Gemini)
+fn translate_message_content(
+    content: MessageContent,
+    tool_id_to_name: &mut std::collections::HashMap<String, String>,
+) -> Result<Vec<GeminiPart>> {
+    let parts = match content {
+        MessageContent::Text(text) => vec![GeminiPart::Text { text }],
+        MessageContent::Blocks(blocks) => blocks
+            .into_iter()
+            .map(|block| translate_content_block(block, tool_id_to_name))
+            .collect::<Result<Vec<_>>>()?,
+    };
+    
+    // Filter out empty text parts (from skipped thinking blocks)
+    let filtered_parts: Vec<GeminiPart> = parts
+        .into_iter()
+        .filter(|part| {
+            !matches!(part, GeminiPart::Text { text } if text.is_empty())
+        })
+        .collect();
+    
+    Ok(filtered_parts)
 }
 
 /// Translate individual content block
@@ -122,7 +150,13 @@ fn translate_content_block(
     tool_id_to_name: &mut std::collections::HashMap<String, String>,
 ) -> Result<GeminiPart> {
     match block {
-        ContentBlock::Text { text } => Ok(GeminiPart::Text { text }),
+        ContentBlock::Text { text, .. } => Ok(GeminiPart::Text { text }),
+
+        // Skip thinking blocks - Claude's thinking is not sent to Gemini
+        ContentBlock::Thinking { .. } => {
+            // Return empty text to avoid breaking message structure
+            Ok(GeminiPart::Text { text: String::new() })
+        }
 
         ContentBlock::Image { .. } => {
             // Translate image block to Gemini InlineData
@@ -130,7 +164,7 @@ fn translate_content_block(
             Ok(GeminiPart::InlineData { inline_data })
         }
 
-        ContentBlock::ToolUse { id, name, input } => {
+        ContentBlock::ToolUse { id, name, input, .. } => {
             debug!("Translating tool use: {}", name);
             // Track tool name for later FunctionResponse
             tool_id_to_name.insert(id.clone(), name.clone());
@@ -151,7 +185,7 @@ fn translate_content_block(
                     // Fallback if we somehow don't have the mapping
                     format!("unknown_tool_{}", tool_use_id)
                 });
-            translate_tool_result(tool_use_id, tool_name, content, is_error)
+            translate_tool_result(tool_use_id, tool_name, content.to_string(), is_error)
         }
     }
 }

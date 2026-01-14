@@ -91,7 +91,7 @@ pub async fn messages_handler(
         .map_err(|e| {
             tracing::error!("Failed to deserialize request: {}", e);
             tracing::error!("Raw body (first 1000 chars): {}", 
-                if body.len() > 1000 { &body[..1000] } else { &body });
+                if body.len() > 5000 { &body[..5000] } else { &body });
             crate::error::ProxyError::InvalidRequest(format!("JSON deserialization error: {}", e))
         })?;
 
@@ -106,7 +106,7 @@ pub async fn messages_handler(
     for (i, msg) in req.messages.iter().enumerate() {
         if let crate::models::anthropic::MessageContent::Blocks(blocks) = &msg.content {
             for (j, block) in blocks.iter().enumerate() {
-                if let crate::models::anthropic::ContentBlock::Image { source } = block {
+                if let crate::models::anthropic::ContentBlock::Image { source, .. } = block {
                     info!("🖼️  Found image in message[{}] block[{}]: {:?}", i, j, match source {
                         crate::models::anthropic::ImageSource::Base64 { media_type, .. } => 
                             media_type.as_ref().map(|mt| format!("base64 {}", mt)).unwrap_or_else(|| "base64 (unknown)".to_string()),
@@ -259,6 +259,7 @@ async fn stream_messages_handler(
     // 5. Convert to axum response
     use axum::body::Body;
     
+    // Create body from stream
     let body = Body::from_stream(sse_stream);
     
     Ok(Response::builder()

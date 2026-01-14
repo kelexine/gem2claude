@@ -53,6 +53,14 @@ pub enum Part {
     Text {
         text: String,
     },
+    /// Extended thinking/reasoning from Gemini (verified from gemini-cli source)
+    Thought {
+        /// Actual thinking text - translate to Claude's thinking blocks
+        thought: String,
+        /// Metadata hash for API validation (optional)
+        #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
+        thought_signature: Option<String>,
+    },
     InlineData {
         #[serde(rename = "inlineData")]
         inline_data: InlineData,

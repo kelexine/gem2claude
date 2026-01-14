@@ -40,7 +40,7 @@ impl SystemPrompt {
                 blocks
                     .iter()
                     .filter_map(|block| match block {
-                        ContentBlock::Text { text } => Some(text.as_str()),
+                        ContentBlock::Text { text, .. } => Some(text.as_str()),
                         _ => None,
                     })
                     .collect::<Vec<_>>()
@@ -71,21 +71,66 @@ pub enum MessageContent {
 pub enum ContentBlock {
     Text {
         text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
+    },
+    /// Extended thinking block (Claude's thinking feature)
+    Thinking {
+        thinking: String,
     },
     Image {
         source: ImageSource,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
     },
     ToolUse {
         id: String,
         name: String,
         input: Value,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
     },
     ToolResult {
         tool_use_id: String,
-        content: String,
+        content: ToolResultContent,
         #[serde(skip_serializing_if = "Option::is_none")]
         is_error: Option<bool>,
     },
+}
+
+/// Tool result content - can be simple text or structured blocks
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ToolResultContent {
+    Text(String),
+    Blocks(Vec<ContentBlock>),
+}
+
+impl ToolResultContent {
+    /// Convert to string for Gemini (which expects string)
+    pub fn to_string(&self) -> String {
+        match self {
+            ToolResultContent::Text(s) => s.clone(),
+            ToolResultContent::Blocks(blocks) => {
+                // Concatenate all text from blocks
+                blocks
+                    .iter()
+                    .filter_map(|block| match block {
+                        ContentBlock::Text { text, .. } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+        }
+    }
+}
+
+/// Cache control for prompt caching (Claude feature)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheControl {
+    #[serde(rename = "type")]
+    cache_type: String, // "ephemeral"
 }
 
 /// Image source for vision content
@@ -107,7 +152,8 @@ pub type ImageBlock = ContentBlock;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tool {
     pub name: String,
-    pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub input_schema: Value, // JSON Schema
 }
 

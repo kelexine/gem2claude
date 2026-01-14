@@ -93,7 +93,13 @@ pub fn translate_parts(parts: Vec<GeminiPart>) -> Result<Vec<ContentBlock>> {
 /// Translate individual part
 fn translate_part(part: GeminiPart) -> Result<ContentBlock> {
     match part {
-        GeminiPart::Text { text } => Ok(ContentBlock::Text { text }),
+        GeminiPart::Text { text } => Ok(ContentBlock::Text { text, cache_control: None }),
+
+        // Extended thinking - translate Gemini thought to Claude thinking block
+        GeminiPart::Thought { thought, .. } => {
+            debug!("Translating Gemini thought to Claude thinking block");
+            Ok(ContentBlock::Thinking { thinking: thought })
+        }
 
         GeminiPart::InlineData { inline_data } => {
             // Gemini can generate images (Imagen) - translate to Claude Image format
@@ -106,13 +112,15 @@ fn translate_part(part: GeminiPart) -> Result<ContentBlock> {
                 source: ImageSource::Base64 {
                     media_type: Some(inline_data.mime_type.clone()),
                     data: inline_data.data.clone(),
-                }
+                },
+                cache_control: None,
             })
         }
 
         GeminiPart::FunctionCall { function_call, .. } => {
             debug!("Translating function call: {}", function_call.name);
             Ok(ContentBlock::ToolUse {
+                cache_control: None,
                 id: format!("toolu_{}", uuid::Uuid::new_v4().simple()),
                 name: function_call.name,
                 input: function_call.args,
