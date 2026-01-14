@@ -16,6 +16,15 @@ A blazing-fast proxy that lets you use **Claude Code CLI** with Google's Gemini 
 - ⚡ **Optimized Performance** — Connection pooling, TCP keep-alive, minimal latency
 - 🔒 **Secure** — OAuth with automatic token refresh, no credentials in code
 
+
+## User Story (Why gem2claude?)
+
+> so, here's the deal, i have a Google Pro plan from last year, which as you know gives you access to google's latest models (including flagship models like the all new Gemini 3 pro/flash), so i want to use AI agents in my local terminal which both tools already provides, but the problem is.
+1. Google's Gemini cli is not cutting it for me, and i've heard claude code is the king of terminal agents, plus it's vast tool liberary, plugins and to crown it all community support (lead by Anthropic itself).
+2. Claude Code requires either a paid plan or api subscription which are Costly (although worth it), and since i already have a gemini pro plan buying api access or a paid plan on claude will, burn a hole in my pocket (yes am that broke) and Is kinda a waste of money since i will be paying twice.
+
+> so here's where my idea comes in, Claude code already supports routing api calls to custom endpoints, my plan: Create a tool that serves a claude code compatible api endpoint and routes the api call to Googles gemini api via OAuth (not the traditional generative api endpoint), the tool will connect to the same endpoint that Gemini Code Assist or Gemini CLI uses when authenticated via OAuth (again not the traditional generative api endpoint).
+
 ## Supported Models
 
 | Claude Model | Gemini Backend | Best For |
