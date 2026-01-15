@@ -71,6 +71,8 @@ phf = { version = "0.11", features = ["macros"] }
 dirs = "5"
 num_cpus = "1"
 base64 = "0.22.1"
+lru = "0.12"
+parking_lot = "0.12"
 
 [dev-dependencies]
 # Testing

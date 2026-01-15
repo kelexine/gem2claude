@@ -155,14 +155,14 @@ pub async fn messages_handler(
     debug!("Received Anthropic request: model={}, stream={:?}", req.model, req.stream);
     
     // Comprehensive request logging for debugging/audit trails
-    debug!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    debug!("📋 REQUEST HEADERS:");
+    debug!("â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”");
+    debug!("ðŸ“‹ REQUEST HEADERS:");
     for (name, value) in headers.iter() {
         if let Ok(value_str) = value.to_str() {
             debug!("  {}: {}", name, value_str);
         }
     }
-    debug!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    debug!("â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”");
     
     let body_json = serde_json::to_string_pretty(&req).unwrap_or_else(|_| "{}".to_string());
     let body_preview = if body_json.len() > 1000 {
@@ -170,8 +170,8 @@ pub async fn messages_handler(
     } else {
         body_json
     };
-    debug!("📄 REQUEST BODY PREVIEW:\n{}", body_preview);
-    debug!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    debug!("ðŸ“„ REQUEST BODY PREVIEW:\n{}", body_preview);
+    debug!("â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”");
 
     // Check for streaming vs non-streaming flow
     if req.stream.unwrap_or(false) {
@@ -200,15 +200,32 @@ async fn non_stream_messages_handler(
 
     // Model and request translation
     let gemini_model = crate::models::mapping::map_model(&req.model)?;
-    let cache_manager_ref = state.cache_manager.as_ref().map(|arc| arc.as_ref());
-    let gemini_client_ref = Some(state.gemini_client.as_ref());
     
-    let gemini_req = translate_request(
-        req.clone(), 
-        state.gemini_client.project_id(), 
-        cache_manager_ref, 
-        gemini_client_ref
-    ).await?;
+    // Check cache first (returns both cache name and cached translation if available)
+    let (cached_content, cached_translation) = if let Some(cache_mgr) = &state.cache_manager {
+        cache_mgr.get_or_create_cache(&req, state.gemini_client.project_id(), &state.gemini_client).await?
+    } else {
+        (None, None)
+    };
+    
+    // Use cached translation if available, otherwise translate now
+    let mut gemini_req = if let Some(cached_req) = cached_translation {
+        debug!("Using cached translation (cache hit)");
+        cached_req
+    } else {
+        debug!("Translating request (cache miss or disabled)");
+        translate_request(
+            req.clone(), 
+            state.gemini_client.project_id(), 
+            None,  // Cache manager already called above
+            None   // Gemini client not needed for translation
+        ).await?
+    };
+    
+    // Apply cached content reference if present
+    if let Some(cache_name) = cached_content {
+        gemini_req.cached_content = Some(cache_name);
+    }
     
     debug!("Executing unary Gemini request");
 
@@ -265,15 +282,32 @@ async fn stream_messages_handler(
 
     // 1. Initial translation and stream setup
     let gemini_model = crate::models::mapping::map_model(&req.model)?;
-    let cache_manager_ref = state.cache_manager.as_ref().map(|arc| arc.as_ref());
-    let gemini_client_ref = Some(state.gemini_client.as_ref());
     
-    let gemini_req = translate_request(
-        req.clone(), 
-        state.gemini_client.project_id(), 
-        cache_manager_ref, 
-        gemini_client_ref
-    ).await?;
+    // Check cache first (returns both cache name and cached translation if available)
+    let (cached_content, cached_translation) = if let Some(cache_mgr) = &state.cache_manager {
+        cache_mgr.get_or_create_cache(&req, state.gemini_client.project_id(), &state.gemini_client).await?
+    } else {
+        (None, None)
+    };
+    
+    // Use cached translation if available, otherwise translate now
+    let mut gemini_req = if let Some(cached_req) = cached_translation {
+        debug!("Using cached translation (cache hit)");
+        cached_req
+    } else {
+        debug!("Translating request (cache miss or disabled)");
+        translate_request(
+            req.clone(), 
+            state.gemini_client.project_id(), 
+            None,  // Cache manager already called above
+            None   // Gemini client not needed for translation
+        ).await?
+    };
+    
+    // Apply cached content reference if present
+    if let Some(cache_name) = cached_content {
+        gemini_req.cached_content = Some(cache_name);
+    }
 
     let gemini_stream = state.gemini_client
         .stream_generate_content(gemini_req, &gemini_model)
@@ -392,4 +426,3 @@ pub async fn event_logging_handler(
     
     axum::http::StatusCode::OK
 }
-
