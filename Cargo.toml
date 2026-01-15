@@ -1,6 +1,6 @@
 [package]
 name = "gem2claude"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["kelexine <https://github.com/kelexine>"]
 description = "OAuth-based Gemini API to Claude Code Compatible Proxy"
@@ -8,7 +8,7 @@ license = "Apache-2.0"
 repository = "https://github.com/kelexine/gem2claude"
 readme = "README.md"
 keywords = ["gemini", "claude", "proxy", "oauth", "ai", "agents"]
-categories = ["command-line-utilities", "web-programming"]
+categories = ["command-line-utilities", "web-programming", "development-tools", "ai"]
 
 [dependencies]
 # Web Framework

@@ -1,4 +1,11 @@
-// Data models module (for API types)
+//! Data models for Anthropic and Gemini APIs.
+//!
+//! This module contains the type definitions for request/response bodies used by:
+//! - The inbound Anthropic-compatible API (`anthropic`)
+//! - The upstream Google Gemini API (`gemini`)
+//! - Model name mapping utilities (`mapping`)
+//! - Streaming event types (`streaming`)
+
 // Author: kelexine (https://github.com/kelexine)
 
 pub mod anthropic;

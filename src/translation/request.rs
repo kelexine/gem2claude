@@ -11,10 +11,18 @@ use crate::models::mapping::map_model;
 use crate::translation::tools::{translate_tool_result, translate_tool_use, translate_tools};
 use tracing::debug;
 
-/// Translate Anthropic MessagesRequest to Gemini GenerateContentRequest
+/// Translate Anthropic MessagesRequest to Gemini GenerateContentRequest.
+///
+/// This is the core logical conversion used by the proxy:
+/// 1. Maps model names (e.g., `claude` -> `gemini)
+/// 2. Enforces Gemini token limits
+/// 3. Converts message history format
+/// 4. Extracts system prompts
+/// 5. Translates tool definitions
+/// 6. Configures generation parameters
 pub async fn translate_request(
     anthropic_req: MessagesRequest,
-    _project_id: &str, // Will be used when we add project-specific features
+    _project_id: &str,
     _cache_manager: Option<&crate::cache::CacheManager>,
     _gemini_client: Option<&crate::gemini::GeminiClient>,
 ) -> Result<GenerateContentRequest> {
@@ -136,7 +144,13 @@ pub async fn translate_request(
     })
 }
 
-/// Translate messages array (Anthropic → Gemini)
+/// Translate messages array (Anthropic → Gemini).
+///
+/// Handles role mapping:
+/// - `user` → `user`
+/// - `assistant` → `model`
+///
+/// Also manages tool use tracking to properly associate `ToolResult`s with their calls.
 fn translate_messages(messages: Vec<Message>) -> Result<Vec<Content>> {
     // Build map of tool_use_id → tool_name for FunctionResponse
     let mut tool_id_to_name = std::collections::HashMap::new();
@@ -164,7 +178,11 @@ fn translate_messages(messages: Vec<Message>) -> Result<Vec<Content>> {
         .collect()
 }
 
-/// Translate individual message content (Anthropic → Gemini)
+/// Translate individual message content (Anthropic → Gemini).
+///
+/// Handles conversion of:
+/// - Simple text
+/// - Structured content blocks (text, images, tool results)
 fn translate_message_content(
     content: MessageContent,
     tool_id_to_name: &mut std::collections::HashMap<String, String>,

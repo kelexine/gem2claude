@@ -51,7 +51,7 @@ impl StreamTranslator {
     }
 
     /// Process text chunk with stateful thinking tag stripping
-    /// Handles <think> tags that may be split across multiple chunks
+    /// Handles `<think>` tags that may be split across multiple chunks
     /// Returns a vector of (BlockType, String) tuples representing segments
     fn process_text_chunk(&mut self, text: &str) -> Vec<(BlockType, String)> {
         let mut segments = Vec::new();
@@ -286,7 +286,7 @@ impl StreamTranslator {
         }
     }
 
-    /// Emit text segments (processing <think> tags)
+    /// Emit text segments (processing `<think>` tags)
     fn emit_text_segments(&mut self, text: &str, events: &mut Vec<StreamEvent>) {
         let segments = self.process_text_chunk(text);
         

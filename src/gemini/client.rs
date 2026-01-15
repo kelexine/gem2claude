@@ -9,16 +9,28 @@ use reqwest::Client;
 use std::time::Duration;
 use tracing::{debug, info, error};
 
+/// Client for the Google Gemini API.
+///
+/// Handles authentication, request signing, and sending requests to the Gemini API.
+/// Includes support for:
+/// - Content generation (streaming and blocking)
+/// - Context caching
+/// - Project ID resolution
 pub struct GeminiClient {
     http_client: Client,
-    #[allow(dead_code)]  // Will be used in Phase 2 for timeouts and retries
+    #[allow(dead_code)] 
     config: GeminiConfig,
     oauth_manager: OAuthManager,
     project_id: String,
 }
 
 impl GeminiClient {
-    /// Create a new Gemini client and resolve project ID
+    /// Create a new Gemini client and resolve project ID via `loadCodeAssist`.
+    ///
+    /// This method will:
+    /// 1. Configure an optimized HTTP client with connection pooling
+    /// 2. Authenticate using the OAuth manager
+    /// 3. Call the `loadCodeAssist` endpoint to resolve the GCP project ID
     pub async fn new(
         config: &GeminiConfig,
         oauth_manager: OAuthManager,
@@ -133,7 +145,9 @@ impl GeminiClient {
         &self.config.api_base_url
     }
 
-    /// Call Gemini generateContent API - returns errors immediately for client-side retry
+    /// Call Gemini `generateContent` API (blocking).
+    ///
+    /// Returns errors immediately for client-side retry, as per Claude API behavior.
     pub async fn generate_content(
         &self,
         request: crate::models::gemini::GenerateContentRequest,
@@ -196,7 +210,9 @@ impl GeminiClient {
         Ok(gemini_response)
     }
 
-    /// Call Gemini streamGenerateContent API for SSE streaming
+    /// Call Gemini `streamGenerateContent` API for SSE streaming.
+    ///
+    /// Returns a stream of response chunks.
     pub async fn stream_generate_content(
         &self,
         request: crate::models::gemini::GenerateContentRequest,
@@ -226,8 +242,10 @@ impl GeminiClient {
         .await
     }
 
-    /// Create a cached content entry via Gemini API
-    /// Returns the cache name (e.g., "cachedContents/abc123")
+    /// Create a cached content entry via Gemini API.
+    ///
+    /// Returns the cache resource name (e.g., `cachedContents/abc123`).
+    /// The cache TTL is currently set to 5 minutes.
     pub async fn create_cache(
         &self,
         model: &str,
@@ -296,8 +314,10 @@ impl GeminiClient {
             res.name
         })
     }
-    /// Check connectivity to Gemini API
-    /// Send a minimal generateContent request to verify API is reachable
+    /// Check connectivity to Gemini API.
+    ///
+    /// Sends a minimal `generateContent` request ("hi") to verify API is reachable
+    /// and authentication is working.
     pub async fn check_connectivity(&self) -> Result<Duration> {
         let url = format!("{}:generateContent", self.config.api_base_url);
 

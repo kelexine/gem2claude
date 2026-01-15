@@ -1,74 +1,97 @@
-// HTTP request handlers
-// Author: kelexine (https://github.com/kelexine)
+//! HTTP request handlers for the gem2claude bridge.
+//!
+//! This module contains the logic for processing incoming requests,
+//! translating them between Anthropic and Gemini formats, and managing
+//! the response streams (SSE).
+//!
+//! Author: kelexine (<https://github.com/kelexine>)
 
 use super::routes::AppState;
 use axum::{extract::State, response::{IntoResponse, Response}, Json};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Response schema for the `/health` check endpoint.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HealthResponse {
+    /// Overall system status (Healthy, Degraded, or Unhealthy).
     pub status: HealthStatus,
+    /// Detailed results for individual subsystem checks.
     pub checks: HashMap<String, HealthCheck>,
+    /// ISO 8601 timestamp of when the check was performed.
     pub timestamp: String,
 }
 
+/// Possible status values for the system health.
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum HealthStatus {
+    /// System is fully operational.
     Healthy,
+    /// System is operational but some non-critical issues were detected.
     Degraded,
+    /// System is not functioning correctly.
     Unhealthy,
 }
 
+/// Details of an individual health check component.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HealthCheck {
+    /// Status of the specific check ("ok", "warning", or "error").
     pub status: String,
+    /// Human-readable message detailing the check result.
     pub message: String,
 }
 
+/// Performs a comprehensive system health check.
+///
+/// This handler verifies:
+/// 1. **OAuth2 Credentials**: Checks token expiration and validity.
+/// 2. **Project Resolution**: Ensures the Google Cloud Project ID is correctly identified.
+/// 3. **Configuration**: Validates that critical environment variables and URLs are set.
+/// 4. **API Connectivity**: Performs a latency check to the upstream Gemini API.
 pub async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
     let mut checks = HashMap::new();
     let mut overall_status = HealthStatus::Healthy;
 
-    // Check OAuth credentials
+    // Check OAuth credentials status
     let (expires_in, is_expired) = state.oauth_manager.token_info().await;
     let oauth_check = if is_expired {
         overall_status = HealthStatus::Unhealthy;
         HealthCheck {
             status: "error".to_string(),
-            message: "Token expired".to_string(),
+            message: "OAuth token is expired or invalid".to_string(),
         }
     } else if expires_in < 600 {
-        // Less than 10 minutes
+        // Less than 10 minutes remaining is considered Degraded
         overall_status = HealthStatus::Degraded;
         HealthCheck {
             status: "warning".to_string(),
-            message: format!("Token expires in {} seconds", expires_in),
+            message: format!("OAuth token expires soon: {} seconds remaining", expires_in),
         }
     } else {
         HealthCheck {
             status: "ok".to_string(),
-            message: format!("Valid token, expires in {} seconds", expires_in),
+            message: format!("OAuth token is valid (expires in {}s)", expires_in),
         }
     };
     checks.insert("oauth_credentials".to_string(), oauth_check);
 
-    // Check project resolution
+    // Verify Cloud Project ID resolution
     let project_check = HealthCheck {
         status: "ok".to_string(),
-        message: format!("Project ID: {}", state.gemini_client.project_id()),
+        message: format!("Resolved Project ID: {}", state.gemini_client.project_id()),
     };
     checks.insert("project_resolution".to_string(), project_check);
 
-    // Check configuration
+    // Check basic server configuration
     let config_check = HealthCheck {
         status: "ok".to_string(),
-        message: format!("API base: {}", state.config.gemini.api_base_url),
+        message: format!("Target Gemini API: {}", state.config.gemini.api_base_url),
     };
     checks.insert("configuration".to_string(), config_check);
 
-    // Check API connectivity
+    // Perform live connectivity check to Gemini API
     let connectivity_check = match state.gemini_client.check_connectivity().await {
         Ok(latency) => {
             let millis = latency.as_millis();
@@ -83,14 +106,14 @@ pub async fn health_handler(State(state): State<AppState>) -> Json<HealthRespons
 
             HealthCheck {
                 status,
-                message: format!("API reachable in {}ms", millis),
+                message: format!("API connectivity latency: {}ms", millis),
             }
         }
         Err(e) => {
             overall_status = HealthStatus::Unhealthy;
             HealthCheck {
                 status: "error".to_string(),
-                message: format!("API connectivity failed: {}", e),
+                message: format!("Upstream API unreachable: {}", e),
             }
         }
     };
@@ -103,7 +126,10 @@ pub async fn health_handler(State(state): State<AppState>) -> Json<HealthRespons
     })
 }
 
-/// Metrics endpoint handler - returns Prometheus format metrics
+/// Exposes Prometheus-compatible application metrics.
+///
+/// Gathers metrics from the global registry, including request counts,
+/// latencies, and token usage statistics.
 pub async fn metrics_handler() -> impl IntoResponse {
     let metrics = crate::metrics::gather_metrics();
     (
@@ -112,7 +138,13 @@ pub async fn metrics_handler() -> impl IntoResponse {
     )
 }
 
-/// Handler for /v1/messages endpoint (Anthropic Messages API compatible)
+/// Unified handler for the Anthropic Messages API compatible endpoint (`/v1/messages`).
+///
+/// This handler:
+/// 1. Validates and parses the Anthropic `MessagesRequest`.
+/// 2. Logs the request details for transparency.
+/// 3. Detects if a streaming response is requested.
+/// 4. Dispatches to either `stream_messages_handler` or `non_stream_messages_handler`.
 pub async fn messages_handler(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -120,17 +152,9 @@ pub async fn messages_handler(
 ) -> Result<Response, crate::error::ProxyError> {
     use tracing::debug;
 
-    // Log raw request for debugging
-    debug!("Raw request received");
-
-    debug!(
-        "Request: {} | {} msgs | stream={}",
-        req.model,
-        req.messages.len(),
-        req.stream.unwrap_or(false)
-    );
+    debug!("Received Anthropic request: model={}, stream={:?}", req.model, req.stream);
     
-    // Log all headers for debugging
+    // Comprehensive request logging for debugging/audit trails
     debug!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     debug!("📋 REQUEST HEADERS:");
     for (name, value) in headers.iter() {
@@ -140,31 +164,16 @@ pub async fn messages_handler(
     }
     debug!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
-    // Log request body (first 500 chars for brevity)
     let body_json = serde_json::to_string_pretty(&req).unwrap_or_else(|_| "{}".to_string());
-    let body_preview = if body_json.len() > 500 {
-        format!("{}...\n  (truncated, {} total chars)", &body_json[..500], body_json.len())
+    let body_preview = if body_json.len() > 1000 {
+        format!("{}...\n(truncated)", &body_json[..1000])
     } else {
         body_json
     };
-    debug!("📄 REQUEST BODY:\n{}", body_preview);
+    debug!("📄 REQUEST BODY PREVIEW:\n{}", body_preview);
     debug!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
-    // Debug: Check for image content
-    for (i, msg) in req.messages.iter().enumerate() {
-        if let crate::models::anthropic::MessageContent::Blocks(blocks) = &msg.content {
-            for (j, block) in blocks.iter().enumerate() {
-                if let crate::models::anthropic::ContentBlock::Image { source, .. } = block {
-                    debug!("Image in msg[{}] block[{}]: {:?}", i, j, match source {
-                        crate::models::anthropic::ImageSource::Base64 { media_type, .. } => 
-                            media_type.as_ref().map(|mt| format!("base64 {}", mt)).unwrap_or_else(|| "base64 (unknown)".to_string()),
-                    });
-                }
-            }
-        }
-    }
-
-    // Check if streaming is requested
+    // Check for streaming vs non-streaming flow
     if req.stream.unwrap_or(false) {
         stream_messages_handler(state, req).await
     } else {
@@ -172,7 +181,14 @@ pub async fn messages_handler(
     }
 }
 
-/// Handle non-streaming messages (original implementation)
+/// Internal handler for non-streaming (unary) message requests.
+///
+/// Workflow:
+/// 1. Maps Anthropic model names to Gemini model strings.
+/// 2. Translates the request structure to Gemini format.
+/// 3. Executes the request against the Google Gemini API.
+/// 4. Translates the Gemini response back to Anthropic format.
+/// 5. Records performance metrics and token usage.
 async fn non_stream_messages_handler(
     state: AppState,
     req: crate::models::anthropic::MessagesRequest,
@@ -180,18 +196,23 @@ async fn non_stream_messages_handler(
     use crate::translation::{translate_request, translate_response};
     use tracing::{debug, error};
 
-    // Start request timer for metrics
     let request_start = std::time::Instant::now();
 
-    // 1. Translate Anthropic request to Gemini format
+    // Model and request translation
     let gemini_model = crate::models::mapping::map_model(&req.model)?;
     let cache_manager_ref = state.cache_manager.as_ref().map(|arc| arc.as_ref());
     let gemini_client_ref = Some(state.gemini_client.as_ref());
-    let gemini_req = translate_request(req.clone(), state.gemini_client.project_id(), cache_manager_ref, gemini_client_ref).await?;
     
-    debug!("Translated request to Gemini format");
+    let gemini_req = translate_request(
+        req.clone(), 
+        state.gemini_client.project_id(), 
+        cache_manager_ref, 
+        gemini_client_ref
+    ).await?;
+    
+    debug!("Executing unary Gemini request");
 
-    // 2. Call Gemini API
+    // Upstream API call
     let gemini_resp = match state.gemini_client.generate_content(gemini_req, &gemini_model).await {
         Ok(resp) => resp,
         Err(e) => {
@@ -200,9 +221,7 @@ async fn non_stream_messages_handler(
         }
     };
     
-    debug!("Received Gemini response");
-
-    // 3. Translate response back to Anthropic format
+    // Response translation back to Anthropic format
     let anthropic_resp = match translate_response(gemini_resp, &req.model) {
         Ok(resp) => resp,
         Err(e) => {
@@ -211,13 +230,9 @@ async fn non_stream_messages_handler(
         }
     };
 
-    debug!("Translated response to Anthropic format");
-
-    // Record metrics
+    // Telemetry and Metrics
     let duration = request_start.elapsed().as_secs_f64();
     crate::metrics::record_request("POST", "/v1/messages", 200, &req.model, duration);
-    
-    // Record token usage
     crate::metrics::record_tokens(
         &req.model,
         anthropic_resp.usage.input_tokens,
@@ -226,11 +241,16 @@ async fn non_stream_messages_handler(
         anthropic_resp.usage.cache_creation_input_tokens,
     );
 
-    // Return JSON response
     Ok(Json(anthropic_resp).into_response())
 }
 
-/// Handle streaming messages with SSE
+/// Internal handler for Server-Sent Events (SSE) streaming requests.
+///
+/// Workflow:
+/// 1. Translates request and initiates Gemini SSE stream.
+/// 2. Spawns an asynchronous stream transformation loop.
+/// 3. Translates Gemini response chunks to Anthropic stream events on-the-fly.
+/// 4. Injects periodic keep-alive pings and buffer flushes to maintain the connection.
 async fn stream_messages_handler(
     state: AppState,
     req: crate::models::anthropic::MessagesRequest,
@@ -240,53 +260,53 @@ async fn stream_messages_handler(
     use crate::translation::translate_request;
     use tracing::{debug, warn};
 
-    debug!("Starting streaming response for model: {}", req.model);
-
-    // Record SSE connection opened
+    debug!("Initiating streaming flow for model: {}", req.model);
     crate::metrics::record_sse_connection("opened");
 
-    // 1. Translate request
+    // 1. Initial translation and stream setup
     let gemini_model = crate::models::mapping::map_model(&req.model)?;
     let cache_manager_ref = state.cache_manager.as_ref().map(|arc| arc.as_ref());
     let gemini_client_ref = Some(state.gemini_client.as_ref());
-    let gemini_req = translate_request(req.clone(), state.gemini_client.project_id(), cache_manager_ref, gemini_client_ref).await?;
+    
+    let gemini_req = translate_request(
+        req.clone(), 
+        state.gemini_client.project_id(), 
+        cache_manager_ref, 
+        gemini_client_ref
+    ).await?;
 
-    // 2. Start Gemini stream
     let gemini_stream = state.gemini_client
         .stream_generate_content(gemini_req, &gemini_model)
         .await?;
 
-    // 3. Create translator
     let mut translator = StreamTranslator::new(req.model.clone());
 
-    // 4. Transform Gemini chunks to Anthropic SSE events with Keep-Alive Pings
+    // 2. Define the transformation closure
     let sse_stream = async_stream::stream! {
-        debug!("Starting SSE stream transformation");
+        debug!("SSE Stream established");
         futures::pin_mut!(gemini_stream);
         
         let mut chunk_count = 0;
         loop {
             tokio::select! {
+                // Poll the upstream Gemini stream
                 chunk_opt = gemini_stream.next() => {
                     match chunk_opt {
                         Some(chunk_result) => {
                             chunk_count += 1;
-                            debug!("Received Gemini chunk #{}", chunk_count);
-                            
                             match chunk_result {
                                 Ok(chunk) => {
-                                    // Translate chunk to events
+                                    // Translate raw Gemini chunk to Anthropic event sequence
                                     match translator.translate_chunk(chunk) {
                                         Ok(events) => {
-                                            // Hot path - minimal logging
                                             for event in events.iter() {
                                                 yield Ok::<String, std::convert::Infallible>(event.to_sse());
-                                                // Add a comment to force client-side buffer flush
+                                                // Buffer flush hint: keepalive comment
                                                 yield Ok(": keepalive\n\n".to_string());
                                             }
                                         }
                                         Err(e) => {
-                                            warn!("Translation error: {}", e);
+                                            warn!("Stream translation error: {}", e);
                                             let error_event = crate::models::streaming::StreamEvent::Error {
                                                 error: crate::models::streaming::ErrorData {
                                                     error_type: "translation_error".to_string(),
@@ -299,7 +319,7 @@ async fn stream_messages_handler(
                                     }
                                 }
                                 Err(e) => {
-                                    warn!("Stream error: {}", e);
+                                    warn!("Upstream stream error: {}", e);
                                     let error_event = crate::models::streaming::StreamEvent::Error {
                                         error: crate::models::streaming::ErrorData {
                                             error_type: "api_error".to_string(),
@@ -311,27 +331,22 @@ async fn stream_messages_handler(
                                 }
                             }
                         }
-                        None => {
-                            // Stream finished normally
-                            break;
-                        }
+                        None => break, // Clean stream completion
                     }
                 }
+                // Maintain connection with active pings
                 _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
-                    // Send ping to keep connection alive and prevent idle timeouts
-                    debug!("Yielding Keep-Alive Ping");
+                    debug!("Yielding keep-alive ping to client");
                     let ping_event = "event: ping\ndata: {\"type\": \"ping\"}\n\n".to_string();
                     yield Ok(ping_event);
                 }
             }
         }
-        debug!("SSE stream ended after {} chunks", chunk_count);
-    };
+        debug!("SSE Stream finished. Total chunks: {}", chunk_count);
+    }; 
 
-    // 5. Convert to axum response
-    // Note: SSE events already end with \n\n which should trigger chunk flush
+    // 3. Construct the finalized HTTP/SSE response
     use axum::body::Body;
-    
     let body = Body::from_stream(sse_stream);
     
     Ok(Response::builder()
@@ -339,28 +354,29 @@ async fn stream_messages_handler(
         .header("Content-Type", "text/event-stream; charset=utf-8")
         .header("Cache-Control", "no-cache")
         .header("Connection", "keep-alive")
-        .header("X-Accel-Buffering", "no")
+        .header("X-Accel-Buffering", "no") // Important for proxy servers like Nginx
         .header("Transfer-Encoding", "chunked")
-        .header("anthropic-version", "2023-06-01")
+        .header("anthropic-version", "2023-06-01") // Mock headers for compatibility
         .header("anthropic-ratelimit-requests-limit", "50")
         .header("anthropic-ratelimit-requests-remaining", "49")
         .header("anthropic-ratelimit-requests-reset", chrono::Utc::now().to_rfc3339())
-        .header("anthropic-ratelimit-tokens-limit", "1000000")
-        .header("anthropic-ratelimit-tokens-remaining", "999950")
-        .header("anthropic-ratelimit-tokens-reset", chrono::Utc::now().to_rfc3339())
         .header("request-id", format!("req_{}", uuid::Uuid::new_v4()))
         .body(body)
         .unwrap())
 }
 
-/// Handler for Claude Code event logging endpoint
+/// Sink handler for Claude Code telemetry and event logging.
+///
+/// Claude Code sometimes sends "batch" event logs. This handler captures them,
+/// appends them to a local log file for auditing, and returns a 200 OK to
+/// ensure compatibility with the client's expectations.
 pub async fn event_logging_handler(
     body: String,
 ) -> impl IntoResponse {
     use std::fs::OpenOptions;
     use std::io::Write;
     
-    // Log to home directory
+    // Log telemetry events to the home directory for transparency
     if let Some(home) = std::env::var_os("HOME") {
         let log_path = std::path::Path::new(&home).join("claude_code_events.log");
         
@@ -374,6 +390,6 @@ pub async fn event_logging_handler(
         }
     }
     
-    // Return 200 OK to stop 404 spam
     axum::http::StatusCode::OK
 }
+

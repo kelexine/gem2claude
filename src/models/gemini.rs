@@ -5,34 +5,54 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-/// Internal API request wrapper
-/// The internal API requires this specific structure with model, project, user_prompt_id
+/// Internal API request wrapper.
+///
+/// The internal API requires this specific structure with model, project, and user_prompt_id,
+/// wrapping the actual `GenerateContentRequest`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InternalApiRequest {
+    /// Target Gemini model name (e.g., "gemini-pro").
     pub model: String,
+    
+    /// Google Cloud project ID (resolved from credentials).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
+    
+    /// User prompt identifier (for internal tracking).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_prompt_id: Option<String>,
+    
+    /// The actual content generation request.
     pub request: GenerateContentRequest,
 }
 
-/// Gemini generate content request (internal API format)
+/// Gemini generate content request (internal API format).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateContentRequest {
+    /// Conversation history.
     pub contents: Vec<Content>,
+    
+    /// System instructions (context).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_instruction: Option<SystemInstruction>,
+    
+    /// Generation parameters (temperature, max tokens, etc.).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub generation_config: Option<GenerationConfig>,
+    
+    /// Tool definitions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolDeclaration>>,
+    
+    /// Tool usage configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_config: Option<ToolConfig>,
+    
+    /// Reference to cached content.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cached_content: Option<String>,  // NEW: Cache name reference
+    pub cached_content: Option<String>,
 }
 
 /// Content in a turn (user or model)
@@ -48,37 +68,51 @@ fn default_role() -> String {
     "model".to_string()
 }
 
-/// Individual part of content
+/// Individual part of content in a Gemini request/response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Part {
+    /// Text content part.
     Text {
+        /// The text string.
         text: String,
-        /// Flag indicating this is thinking content (Gemini 2.5/3.x)
+        
+        /// Flag indicating this is thinking content (Gemini 2.5/3.x).
         #[serde(skip_serializing_if = "Option::is_none")]
         thought: Option<bool>,
+        
+        /// Metadata hash for API validation.
         #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
         thought_signature: Option<String>,
     },
-    /// Extended thinking/reasoning from Gemini (verified from gemini-cli source)
+    
+    /// Extended thinking/reasoning from Gemini.
     Thought {
-        /// Actual thinking text - translate to Claude's thinking blocks
+        /// Actual thinking text - translate to Claude's thinking blocks.
         thought: String,
-        /// Metadata hash for API validation (optional)
+        
+        /// Metadata hash for API validation (optional).
         #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
         thought_signature: Option<String>,
     },
+    
+    /// Inline data (images, etc).
     InlineData {
         #[serde(rename = "inlineData")]
         inline_data: InlineData,
     },
+    
+    /// Model requesting to call a function.
     FunctionCall {
         #[serde(rename = "functionCall")]
         function_call: FunctionCall,
-        /// Required by Gemini 3 models for function calls in conversation history
+        
+        /// Required by Gemini 3 models for function calls in conversation history.
         #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
         thought_signature: Option<String>,
     },
+    
+    /// Result of a function call.
     FunctionResponse {
         #[serde(rename = "functionResponse")]
         function_response: FunctionResponse,
@@ -145,24 +179,28 @@ pub struct GenerationConfig {
     pub thinking_config: Option<ThinkingConfig>,
 }
 
-/// Extended thinking configuration for Gemini models
+/// Extended thinking configuration for Gemini models.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThinkingConfig {
+    /// Whether to include thinking in the output.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_thoughts: Option<bool>,
-    /// Token budget for thinking (Gemini 2.5)
+    
+    /// Token budget for thinking (Gemini 2.5).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_budget: Option<u32>,
-    /// Thinking level for Gemini 3.x: "LOW", "MEDIUM", "HIGH"
+    
+    /// Thinking level for Gemini 3.x: "LOW", "MEDIUM", "HIGH".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<String>,
 }
 
-/// Tool declaration (must use camelCase for internal API)
+/// Tool declaration (must use camelCase for internal API).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolDeclaration {
+    /// List of function signatures available to the model.
     pub function_declarations: Vec<FunctionDeclaration>,
 }
 
@@ -183,18 +221,18 @@ pub struct ToolConfig {
     pub function_calling_config: FunctionCallingConfig,
 }
 
-/// Function calling configuration
+/// Function calling configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FunctionCallingConfig {
-    /// Mode: "AUTO", "ANY", or "NONE"
+    /// Mode: "AUTO", "ANY", or "NONE".
     pub mode: String,
 }
 
-/// Gemini response (with internal API wrapper)
+/// Gemini response (with internal API wrapper).
 #[derive(Debug, Clone, Deserialize)]
 pub struct GenerateContentResponse {
-    /// Internal API wraps response in this envelope
+    /// Internal API wraps response in this envelope.
     pub response: Option<ResponseWrapper>,
 }
 
@@ -218,16 +256,23 @@ pub struct Candidate {
     pub safety_ratings: Option<Vec<Value>>,
 }
 
-/// Token usage metadata
+/// Token usage metadata.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageMetadata {
+    /// Tokens in the input prompt.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_token_count: Option<u32>,
+    
+    /// Tokens in the generated response.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub candidates_token_count: Option<u32>,
+    
+    /// Total tokens (prompt + candidates).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_token_count: Option<u32>,
+    
+    /// Number of tokens read from the cache.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cached_content_token_count: Option<u32>,  // NEW: Cached tokens
+    pub cached_content_token_count: Option<u32>, 
 }

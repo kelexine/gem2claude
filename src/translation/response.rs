@@ -18,7 +18,14 @@ fn get_thinking_regex() -> &'static Regex {
     })
 }
 
-/// Translate Gemini response to Anthropic format
+/// Translate Gemini GenerateContent response to Anthropic MessagesResponse.
+///
+/// This function:
+/// 1. Unwraps the Gemini internal response envelope
+/// 2. Extracts conversion candidates
+/// 3. Cleans up "thinking" artifacts from Gemini 3.x
+/// 4. Converts content parts (text, images, function calls)
+/// 5. Maps usage statistics and stop reasons
 pub fn translate_response(
     gemini_resp: GenerateContentResponse,
     model: &str,
@@ -87,12 +94,19 @@ fn strip_thinking_artifacts(parts: Vec<GeminiPart>) -> Result<Vec<GeminiPart>> {
         .collect()
 }
 
-/// Translate Gemini parts to Anthropic content blocks
+/// Translate Gemini parts to Anthropic content blocks.
 pub fn translate_parts(parts: Vec<GeminiPart>) -> Result<Vec<ContentBlock>> {
     parts.into_iter().map(translate_part).collect()
 }
 
-/// Translate individual part
+/// Translate individual part.
+///
+/// Handles:
+/// - Text -> TextBlock
+/// - Thought -> ThinkingBlock
+/// - InlineData -> ImageBlock
+/// - FunctionCall -> ToolUseBlock
+/// - FunctionResponse -> Error (should not be in output)
 fn translate_part(part: GeminiPart) -> Result<ContentBlock> {
     match part {
         GeminiPart::Text { text, .. } => Ok(ContentBlock::Text { text, cache_control: None }),
