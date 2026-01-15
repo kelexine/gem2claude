@@ -55,36 +55,44 @@ pub enum ProxyError {
 
     #[error("Service unavailable: {0}")]
     ServiceUnavailable(String),
+
+    #[error("API overloaded: {0}")]
+    Overloaded(String),
 }
 
-// Convert ProxyError to HTTP responses for Axum
+// Convert ProxyError to HTTP responses for Axum (matches Claude API error format)
 impl IntoResponse for ProxyError {
     fn into_response(self) -> Response {
         let (status, error_type, message) = match self {
+            // 401 - authentication_error
             ProxyError::OAuth(_) | ProxyError::InvalidCredentials(_) | ProxyError::TokenExpired | ProxyError::OAuthRefresh(_) => {
                 (StatusCode::UNAUTHORIZED, "authentication_error", self.to_string())
             }
-            ProxyError::InvalidRequest(_) => {
+            // 400 - invalid_request_error
+            ProxyError::InvalidRequest(_) | ProxyError::Translation(_) => {
                 (StatusCode::BAD_REQUEST, "invalid_request_error", self.to_string())
             }
+            // 429 - rate_limit_error
             ProxyError::TooManyRequests(_) => {
                 (StatusCode::TOO_MANY_REQUESTS, "rate_limit_error", self.to_string())
             }
+            // 529 - overloaded_error (Gemini API overloaded)
+            ProxyError::Overloaded(_) => {
+                (StatusCode::from_u16(529).unwrap(), "overloaded_error", self.to_string())
+            }
+            // 503 - api_error (Service unavailable)
             ProxyError::ServiceUnavailable(_) => {
                 (StatusCode::SERVICE_UNAVAILABLE, "api_error", self.to_string())
             }
-            ProxyError::Config(_) | ProxyError::ConfigParsing(_) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, "configuration_error", self.to_string())
+            // 500 - api_error (catch-all for internal errors)
+            ProxyError::Config(_) | ProxyError::ConfigParsing(_) | ProxyError::Internal(_) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, "api_error", self.to_string())
             }
-            ProxyError::ProjectResolution(_) => {
-                (StatusCode::SERVICE_UNAVAILABLE, "project_resolution_error", self.to_string())
-            }
-            ProxyError::GeminiApi(_) => {
+            // 502 - api_error (upstream API errors)
+            ProxyError::ProjectResolution(_) | ProxyError::GeminiApi(_) => {
                 (StatusCode::BAD_GATEWAY, "api_error", self.to_string())
             }
-            ProxyError::Translation(_) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, "translation_error", self.to_string())
-            }
+            // Default - api_error
             _ => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "api_error", self.to_string())
             }

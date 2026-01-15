@@ -136,6 +136,7 @@ impl CacheManager {
         if let Some(cache_name) = cache_map.get(&cache_key) {
             debug!("Cache hit: {}", cache_name);
             self.stats.write().await.hits += 1;
+            crate::metrics::record_cache_hit();
             return Ok(Some(cache_name.clone()));
         }
         drop(cache_map);
@@ -143,6 +144,7 @@ impl CacheManager {
         // Cache miss - create new cache via Gemini API
         debug!("Cache miss for key: {}", &cache_key[..16]);
         self.stats.write().await.misses += 1;
+        crate::metrics::record_cache_miss();
 
         // Translate system and messages to Gemini format
         let gemini_system = system.as_ref().map(|s| {
@@ -194,6 +196,7 @@ impl CacheManager {
                 debug!("Cache created: {}", cache_name);
                 self.cache_map.write().await.insert(cache_key, cache_name.clone());
                 self.stats.write().await.creates += 1;
+                crate::metrics::record_cache_create();
                 Ok(Some(cache_name))
             }
             Err(e) => {

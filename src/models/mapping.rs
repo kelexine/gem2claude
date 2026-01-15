@@ -11,13 +11,13 @@ static MODEL_MAP: phf::Map<&'static str, &'static str> = phf_map! {
     "claude-opus-4.5" => "gemini-3-pro-preview",
     "claude-opus-4-5" => "gemini-3-pro-preview",
     
-    "claude-sonnet-4-5-20250929" => "gemini-3-pro-preview",
-    "claude-sonnet-4.5" => "gemini-3-pro-preview",
-    "claude-sonnet-4-5" => "gemini-3-pro-preview",
+    "claude-sonnet-4-5-20250929" => "gemini-3-flash-preview",
+    "claude-sonnet-4.5" => "gemini-3-flash-preview",
+    "claude-sonnet-4-5" => "gemini-3-flash-preview",
     
-    "claude-haiku-4-5-20251001" => "gemini-3-flash-preview",
-    "claude-haiku-4.5" => "gemini-3-flash-preview",
-    "claude-haiku-4-5" => "gemini-3-flash-preview",
+    "claude-haiku-4-5-20251001" => "gemini-2.5-pro",
+    "claude-haiku-4.5" => "gemini-2.5-pro",
+    "claude-haiku-4-5" => "gemini-2.5-pro",
     
     // Claude 4/4.1 Generation (May 2025 - Aug 2025)
     "claude-opus-4-1-20250805" => "gemini-2.5-pro",
@@ -27,12 +27,12 @@ static MODEL_MAP: phf::Map<&'static str, &'static str> = phf_map! {
     "claude-opus-4-20250514" => "gemini-2.5-pro",
     "claude-opus-4" => "gemini-2.5-pro",
     
-    "claude-sonnet-4-20250514" => "gemini-3-flash-preview",
-    "claude-sonnet-4" => "gemini-3-flash-preview",
+    "claude-sonnet-4-20250514" => "gemini-2.5-flash",
+    "claude-sonnet-4" => "gemini-2.5-flash",
     
     // Claude 3.7 Generation (Feb 2025 - Mar 2025)
-    "claude-3-7-sonnet-20250224" => "gemini-2.5-pro",
-    "claude-3.7-sonnet" => "gemini-2.5-pro",
+    "claude-3-7-sonnet-20250224" => "gemini-2.5-flash-lite",
+    "claude-3.7-sonnet" => "gemini-2.5-flash-lite",
     
 };
 /// Map Claude model name to Gemini model name
@@ -75,8 +75,7 @@ mod tests {
     #[test]
     fn test_model_mapping() {
         assert_eq!(map_model("claude-sonnet-4-5").unwrap(), "gemini-3-pro-preview");
-        assert_eq!(map_model("claude-opus-4").unwrap(), "gemini-3-pro-preview");
-        assert_eq!(map_model("claude-3-5-sonnet").unwrap(), "gemini-2.5-flash");
+        assert_eq!(map_model("claude-opus-4").unwrap(), "gemini-2.5-pro");
         assert!(map_model("unknown-model").is_err());
     }
 
@@ -85,7 +84,7 @@ mod tests {
         // Test with date suffix
         assert_eq!(
             map_model("claude-sonnet-4-5-20250929").unwrap(),
-            "gemini-3-pro-preview"
+            "gemini-3-flash-preview"
         );
         assert_eq!(
             map_model("claude-opus-4-5-20251101").unwrap(),
@@ -95,9 +94,9 @@ mod tests {
             map_model("claude-haiku-4-5-20251001").unwrap(),
             "gemini-2.5-pro"
         );
-        
+
         // Test without date suffix
-        assert_eq!(map_model("claude-sonnet-4-5").unwrap(), "gemini-3-pro-preview");
+        assert_eq!(map_model("claude-sonnet-4-5").unwrap(), "gemini-3-flash-preview");
     }
 
     #[test]
@@ -112,6 +111,6 @@ mod tests {
         // This test verifies that MODEL_MAP is a compile-time constant
         // If phf is working correctly, this lookup has zero runtime overhead
         let result = MODEL_MAP.get("claude-sonnet-4");
-        assert_eq!(result, Some(&"gemini-3-pro-preview"));
+        assert_eq!(result, Some(&"gemini-3-flash-preview"));
     }
 }

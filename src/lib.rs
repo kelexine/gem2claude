@@ -5,6 +5,7 @@ pub mod cache;
 pub mod config;
 pub mod error;
 pub mod gemini;
+pub mod metrics;
 pub mod models;
 pub mod oauth;
 pub mod server;

@@ -24,36 +24,30 @@ pub async fn stream_generate_content(
     let request_body_clone = request_body.clone();
     let oauth_manager = oauth_manager.clone();
 
-    // Retry the initial HTTP connection (handles 429 at stream start)
-    let response = crate::utils::retry::with_retry(
-        "Gemini SSE Stream",
-        || async {
-            let access_token = oauth_manager.get_token().await
-                .map_err(|e| (500u16, format!("OAuth error: {}", e)))?;
+    // Per Claude API docs: streaming errors should be returned immediately, not silently retried
+    let access_token = oauth_manager.get_token().await?;
 
-            let response = client
-                .post(&url_clone)
-                .header("Authorization", format!("Bearer {}", access_token))
-                .header("Content-Type", "application/json")
-                .header("Accept", "text/event-stream")
-                .body(request_body_clone.clone())
-                .send()
-                .await
-                .map_err(|e| (500u16, format!("HTTP error: {}", e)))?;
+    let response = client
+        .post(&url_clone)
+        .header("Authorization", format!("Bearer {}", access_token))
+        .header("Content-Type", "application/json")
+        .header("Accept", "text/event-stream")
+        .body(request_body_clone.clone())
+        .send()
+        .await
+        .map_err(|e| ProxyError::GeminiApi(format!("HTTP error: {}", e)))?;
 
-            let status = response.status();
-            if !status.is_success() {
-                let error_text = response.text().await.unwrap_or_default();
-                return Err((status.as_u16(), error_text));
-            }
-
-            Ok(response)
-        },
-    )
-    .await
-    .map_err(|(status, error_body)| {
-        ProxyError::GeminiApi(format!("HTTP {}: {}", status, error_body))
-    })?;
+    let status = response.status();
+    if !status.is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        // Match Claude API error types
+        return Err(match status.as_u16() {
+            429 => ProxyError::TooManyRequests(error_text),
+            529 => ProxyError::Overloaded(error_text),
+            503 | 504 => ProxyError::ServiceUnavailable(error_text),
+            _ => ProxyError::GeminiApi(format!("HTTP {}: {}", status, error_text)),
+        });
+    }
 
     // Convert response to byte stream (after successful connection)
     let byte_stream = response.bytes_stream();

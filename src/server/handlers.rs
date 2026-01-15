@@ -103,6 +103,15 @@ pub async fn health_handler(State(state): State<AppState>) -> Json<HealthRespons
     })
 }
 
+/// Metrics endpoint handler - returns Prometheus format metrics
+pub async fn metrics_handler() -> impl IntoResponse {
+    let metrics = crate::metrics::gather_metrics();
+    (
+        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+        metrics
+    )
+}
+
 /// Handler for /v1/messages endpoint (Anthropic Messages API compatible)
 pub async fn messages_handler(
     State(state): State<AppState>,
@@ -171,6 +180,9 @@ async fn non_stream_messages_handler(
     use crate::translation::{translate_request, translate_response};
     use tracing::{debug, error};
 
+    // Start request timer for metrics
+    let request_start = std::time::Instant::now();
+
     // 1. Translate Anthropic request to Gemini format
     let gemini_model = crate::models::mapping::map_model(&req.model)?;
     let cache_manager_ref = state.cache_manager.as_ref().map(|arc| arc.as_ref());
@@ -201,6 +213,19 @@ async fn non_stream_messages_handler(
 
     debug!("Translated response to Anthropic format");
 
+    // Record metrics
+    let duration = request_start.elapsed().as_secs_f64();
+    crate::metrics::record_request("POST", "/v1/messages", 200, &req.model, duration);
+    
+    // Record token usage
+    crate::metrics::record_tokens(
+        &req.model,
+        anthropic_resp.usage.input_tokens,
+        anthropic_resp.usage.output_tokens,
+        anthropic_resp.usage.cache_read_input_tokens,
+        anthropic_resp.usage.cache_creation_input_tokens,
+    );
+
     // Return JSON response
     Ok(Json(anthropic_resp).into_response())
 }
@@ -216,6 +241,9 @@ async fn stream_messages_handler(
     use tracing::{debug, warn};
 
     debug!("Starting streaming response for model: {}", req.model);
+
+    // Record SSE connection opened
+    crate::metrics::record_sse_connection("opened");
 
     // 1. Translate request
     let gemini_model = crate::models::mapping::map_model(&req.model)?;

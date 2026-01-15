@@ -23,7 +23,6 @@ A blazing-fast proxy that lets you use **Claude Code** with Google's Gemini mode
 ## Why gem2claude?
 
 > [!NOTE]
-> **Project Goal: Gemini-to-Claude API Bridge**
 >
 > So, here's the deal: I have a Google Pro plan from last year, which gives you access to Google's latest models (including flagship models like the all-new Gemini 3 Pro/Flash). I want to use AI agents in my local terminal, but the problem is:
 >

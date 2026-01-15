@@ -107,6 +107,7 @@ impl GeminiClient {
         .await
         .map_err(|(status, body)| match status {
             429 => ProxyError::TooManyRequests(body),
+            529 => ProxyError::Overloaded(format!("Gemini API overloaded: {}", body)),
             503 | 504 => ProxyError::ServiceUnavailable(format!("Upstream unavailable: {}", body)),
             _ => ProxyError::ProjectResolution(format!("HTTP {}: {}", status, body)),
         })
@@ -132,7 +133,7 @@ impl GeminiClient {
         &self.config.api_base_url
     }
 
-    /// Call Gemini generateContent API with intelligent retry logic
+    /// Call Gemini generateContent API - returns errors immediately for client-side retry
     pub async fn generate_content(
         &self,
         request: crate::models::gemini::GenerateContentRequest,
@@ -141,70 +142,58 @@ impl GeminiClient {
         let url = format!("{}:generateContent", self.config.api_base_url);
         debug!("Calling generateContent API for model: {}", model);
 
-        // Wrap request in internal API structure (prepare once)
+        // Wrap request in internal API structure
         let wrapped_request = crate::models::gemini::InternalApiRequest {
             model: model.to_string(),
             project: Some(self.project_id.clone()),
             user_prompt_id: Some(format!("req_{}", uuid::Uuid::new_v4().simple())),
-            request: request.clone(),
+            request,
         };
 
-        // Clone what we need for the retry closure
-        let http_client = self.http_client.clone();
-        let url = url.clone();
-        let oauth_manager = self.oauth_manager.clone();
-        let wrapped_request = wrapped_request.clone();
+        // Per Claude API docs: return errors immediately, let Claude Code handle retries
+        let access_token = self.oauth_manager.get_token().await?;
 
-        // Use intelligent retry with Google's retryDelay hints
-        crate::utils::retry::with_retry(
-            "Gemini API",
-            || async {
-                let access_token = oauth_manager.get_token().await
-                    .map_err(|e| (500, format!("OAuth error: {}", e)))?;
+        let response = self.http_client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("Content-Type", "application/json")
+            .json(&wrapped_request)
+            .send()
+            .await
+            .map_err(|e| ProxyError::GeminiApi(format!("HTTP error: {}", e)))?;
 
-                let response = http_client
-                    .post(&url)
-                    .header("Authorization", format!("Bearer {}", access_token))
-                    .header("Content-Type", "application/json")
-                    .json(&wrapped_request)
-                    .send()
-                    .await
-                    .map_err(|e| (500, format!("HTTP error: {}", e)))?;
+        let status = response.status();
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            error!(
+                "Gemini API error: HTTP {} - Response body: {}",
+                status, error_text
+            );
+            // Return error immediately with proper Claude error type
+            return Err(match status.as_u16() {
+                429 => ProxyError::TooManyRequests(format!("Gemini API quota exceeded: {}", error_text)),
+                529 => ProxyError::Overloaded(format!("Gemini API overloaded: {}", error_text)),
+                503 | 504 => ProxyError::ServiceUnavailable(format!("Upstream unavailable: {}", error_text)),
+                _ => ProxyError::GeminiApi(format!("HTTP {}: {}", status, error_text)),
+            });
+        }
 
-                let status = response.status();
-                if !status.is_success() {
-                    let error_text = response.text().await.unwrap_or_default();
-                    error!(
-                        "Gemini API error: HTTP {} - Response body: {}",
-                        status, error_text
-                    );
-                    return Err((status.as_u16(), error_text));
-                }
+        let response_text = response.text().await
+            .map_err(|e| ProxyError::GeminiApi(format!("Failed to read response body: {}", e)))?;
 
-                let response_text = response.text().await
-                    .map_err(|e| (500, format!("Failed to read response body: {}", e)))?;
+        debug!("Raw Gemini response (first 500 chars): {}",
+            response_text.chars().take(500).collect::<String>());
 
-                debug!("Raw Gemini response (first 500 chars): {}",
-                    response_text.chars().take(500).collect::<String>());
+        let gemini_response: crate::models::gemini::GenerateContentResponse =
+            serde_json::from_str(&response_text)
+            .map_err(|e| {
+                error!("Failed to parse Gemini response: {}", e);
+                error!("Response body: {}", response_text);
+                ProxyError::GeminiApi(format!("Response parsing error: {}", e))
+            })?;
 
-                let gemini_response: crate::models::gemini::GenerateContentResponse =
-                    serde_json::from_str(&response_text)
-                    .map_err(|e| {
-                        error!("Failed to parse Gemini response: {}", e);
-                        error!("Response body: {}", response_text);
-                        (500, format!("Response parsing error: {}", e))
-                    })?;
-
-                debug!("Successfully received Gemini response");
-                Ok(gemini_response)
-            },
-        )
-        .await
-        .map_err(|(status, error_body)| match status {
-            429 => ProxyError::TooManyRequests(format!("Gemini API quota exceeded: {}", error_body)),
-            503 | 504 => ProxyError::ServiceUnavailable(format!("Upstream unavailable: {}", error_body)),
-            _ => ProxyError::GeminiApi(format!("HTTP {}: {}", status, error_body)),
-        })
+        debug!("Successfully received Gemini response");
+        Ok(gemini_response)
     }
 
     /// Call Gemini streamGenerateContent API for SSE streaming

@@ -1,7 +1,7 @@
 // HTTP routes configuration
 // Author: kelexine (https://github.com/kelexine)
 
-use super::handlers::{event_logging_handler, health_handler, messages_handler};
+use super::handlers::{event_logging_handler, health_handler, messages_handler, metrics_handler};
 use super::middleware::request_id_layers;
 use crate::config::AppConfig;
 use crate::error::Result;
@@ -47,6 +47,7 @@ pub fn create_router(
 
     let app = Router::new()
         .route("/health", get(health_handler))
+        .route("/metrics", get(metrics_handler))
         .route("/v1/messages", post(messages_handler))
         .route("/api/event_logging/batch", post(event_logging_handler))
         .layer(tower_http::limit::RequestBodyLimitLayer::new(50 * 1024 * 1024))

@@ -174,6 +174,7 @@ impl OAuthManager {
             .await
             .map_err(|(status, body)| match status {
                 429 => ProxyError::TooManyRequests(body),
+                529 => ProxyError::Overloaded(format!("OAuth service overloaded: {}", body)),
                 503 | 504 => ProxyError::ServiceUnavailable(body),
                 _ => ProxyError::OAuthRefresh(format!("HTTP {}: {}", status, body)),
             })?;
