@@ -15,8 +15,8 @@ use tracing::debug;
 pub async fn translate_request(
     anthropic_req: MessagesRequest,
     _project_id: &str, // Will be used when we add project-specific features
-    cache_manager: Option<&crate::cache::CacheManager>,
-    gemini_client: Option<&crate::gemini::GeminiClient>,
+    _cache_manager: Option<&crate::cache::CacheManager>,
+    _gemini_client: Option<&crate::gemini::GeminiClient>,
 ) -> Result<GenerateContentRequest> {
     debug!(
         "Translating request for model: {}",
@@ -298,9 +298,11 @@ mod tests {
             content: MessageContent::Blocks(vec![
                 ContentBlock::Text {
                     text: "First block".to_string(),
+                    cache_control: None,
                 },
                 ContentBlock::Text {
                     text: "Second block".to_string(),
+                    cache_control: None,
                 },
             ]),
         }];

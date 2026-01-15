@@ -2,7 +2,7 @@
 // Author: kelexine (https://github.com/kelexine)
 
 use crate::cache::models::{CacheConfig, CacheStats};
-use crate::error::{ProxyError, Result};
+use crate::error::Result;
 use crate::models::anthropic::{ContentBlock, Message, SystemPrompt};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;

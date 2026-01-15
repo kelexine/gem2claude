@@ -85,6 +85,17 @@ pub enum Part {
     },
 }
 
+impl Part {
+    /// Get text content if this is a Text or Thought part
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Part::Text { text, .. } => Some(text),
+            Part::Thought { thought, .. } => Some(thought),
+            _ => None,
+        }
+    }
+}
+
 /// Inline image data for vision
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InlineData {

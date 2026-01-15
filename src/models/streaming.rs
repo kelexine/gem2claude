@@ -2,8 +2,6 @@
 // Author: kelexine (https://github.com/kelexine)
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-
 use super::anthropic::{ContentBlock, Usage};
 
 /// All possible Anthropic SSE event types
@@ -112,6 +110,8 @@ mod tests {
                 usage: Usage {
                     input_tokens: 10,
                     output_tokens: 0,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
                 },
             },
         };

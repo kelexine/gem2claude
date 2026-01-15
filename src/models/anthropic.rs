@@ -132,7 +132,7 @@ impl ToolResultContent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheControl {
     #[serde(rename = "type")]
-    cache_type: String, // "ephemeral"
+    pub cache_type: String, // "ephemeral"
 }
 
 /// Image source for vision content

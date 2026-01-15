@@ -11,6 +11,7 @@ use tracing::debug;
 enum BlockType {
     Text,
     Thinking,
+    #[allow(dead_code)]
     ToolUse,
 }
 

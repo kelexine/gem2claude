@@ -6,7 +6,6 @@ use crate::models::gemini::GenerateContentResponse;
 use crate::oauth::OAuthManager;
 use futures::stream::Stream;
 use reqwest::Client;
-use serde::Deserialize;
 use std::pin::Pin;
 use tracing::{debug, warn};
 
@@ -86,21 +85,36 @@ where
                     debug!("Received chunk: {} bytes, content: {:?}", chunk.len(), chunk_str.chars().take(200).collect::<String>());
                     buffer.push_str(&chunk_str);
 
-                    // Internal Gemini API uses CRLF line endings (\r\n\r\n), not just LF (\n\n)
+                    // Parse all complete SSE events in the buffer
+                    // Robustly handle both standard LF (\n\n) and Gemini's CRLF (\r\n\r\n) delimiters
                     let mut events_in_this_chunk = 0;
-                    while let Some(event_end) = buffer.find("\r\n\r\n") {
-                        let event_data = buffer[..event_end].to_string();
-                        buffer = buffer[event_end + 4..].to_string(); // Skip 4 chars: \r\n\r\n
+                    loop {
+                        // Find the earliest delimiter
+                        let lf_pos = buffer.find("\n\n");
+                        let crlf_pos = buffer.find("\r\n\r\n");
 
-                        debug!("Found complete SSE event: {}", event_data.chars().take(100).collect::<String>());
-                        
+                        let (event_end, delim_len) = match (lf_pos, crlf_pos) {
+                            (Some(lf), Some(crlf)) => {
+                                if lf <= crlf {
+                                    (lf, 2)
+                                } else {
+                                    (crlf, 4)
+                                }
+                            }
+                            (Some(lf), None) => (lf, 2),
+                            (None, Some(crlf)) => (crlf, 4),
+                            (None, None) => break,
+                        };
+
+                        let event_data = buffer[..event_end].to_string();
+                        buffer = buffer[event_end + delim_len..].to_string();
+
+                        debug!("Found complete SSE event (len: {})", event_data.len());
+
                         // Parse the SSE event
                         if let Some(response) = parse_sse_event(&event_data) {
                             events_in_this_chunk += 1;
-                            debug!("Successfully parsed SSE event #{}, yielding response", events_in_this_chunk);
                             yield Ok(response);
-                        } else {
-                            debug!("Failed to parse SSE event or event was empty");
                         }
                     }
                     if events_in_this_chunk > 0 {
@@ -190,5 +204,35 @@ mod tests {
         let event = "event: ping";
         let result = parse_sse_event(event);
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_parse_sse_stream_mixed_delimiters() {
+        use futures::StreamExt;
+
+        // Create a stream with mixed delimiters: \n\n (LF) and \r\n\r\n (CRLF)
+        let event1 = r#"data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"First"}]}}]}}"#;
+        let event2 = r#"data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"Second"}]}}]}}"#;
+        let event3 = r#"data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"Third"}]}}]}}"#;
+
+        // LF, CRLF, LF
+        let payload = format!("{}\n\n{}\r\n\r\n{}\n\n", event1, event2, event3);
+
+        let stream = futures::stream::iter(vec![
+            Ok(bytes::Bytes::from(payload))
+        ]);
+
+        let parsed_stream = parse_sse_stream(stream);
+        futures::pin_mut!(parsed_stream);
+        let mut events = Vec::new();
+
+        while let Some(result) = parsed_stream.next().await {
+            events.push(result.unwrap());
+        }
+
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[0].response.as_ref().unwrap().candidates[0].content.parts[0].as_text().unwrap(), "First");
+        assert_eq!(events[1].response.as_ref().unwrap().candidates[0].content.parts[0].as_text().unwrap(), "Second");
+        assert_eq!(events[2].response.as_ref().unwrap().candidates[0].content.parts[0].as_text().unwrap(), "Third");
     }
 }

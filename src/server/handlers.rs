@@ -81,7 +81,7 @@ pub async fn messages_handler(
     headers: axum::http::HeaderMap,
     Json(req): Json<crate::models::anthropic::MessagesRequest>,
 ) -> Result<Response, crate::error::ProxyError> {
-    use tracing::{debug, info};
+    use tracing::debug;
 
     // Log raw request for debugging
     debug!("Raw request received");

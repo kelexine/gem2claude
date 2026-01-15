@@ -206,8 +206,8 @@ fn ensure_type_fields(value: Value) -> Value {
 /// Uses stored thoughtSignature if available, falls back to skip_thought_signature_validator
 pub fn translate_tool_use(id: String, name: String, input: Value) -> GeminiPart {
     use crate::translation::signature_store::get_signature;
-    use tracing::{debug, info};
-    
+    use tracing::debug;
+
     // Try to retrieve the original thoughtSignature that Gemini sent with this function call
     let thought_signature = match get_signature(&id) {
         Some(sig) => {
@@ -234,7 +234,7 @@ pub fn translate_tool_use(id: String, name: String, input: Value) -> GeminiPart 
 
 /// Translate tool result (Anthropic → Gemini FunctionResponse)
 pub fn translate_tool_result(
-    tool_use_id: String,
+    _tool_use_id: String,
     tool_name: String,
     content: String,
     is_error: Option<bool>,

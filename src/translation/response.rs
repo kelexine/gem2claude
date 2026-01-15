@@ -226,7 +226,7 @@ mod tests {
 
         let result = translate_part(text_part).unwrap();
 
-        if let ContentBlock::Text { text } = result {
+        if let ContentBlock::Text { text, .. } = result {
             assert_eq!(text, "Hello");
         } else {
             panic!("Expected Text content block");
@@ -238,7 +238,7 @@ mod tests {
         let function_part = GeminiPart::FunctionCall {
             function_call: FunctionCall {
                 name: "get_weather".to_string(),
-                args: serde_json::json!({"city": "London"}),
+                args: serde_json::json!({"location": "NYC"}),
             },
             thought_signature: None,
         };
