@@ -4,7 +4,7 @@
 use crate::error::{ProxyError, Result};
 use phf::phf_map;
 
-/// Compile-time perfect hash map for model mapping (zero runtime cost)
+/// Compile-time hash map for model mapping
 static MODEL_MAP: phf::Map<&'static str, &'static str> = phf_map! {
     // Claude 4.5 and Gemini 3 Generation (Sep 2025 - Jan 2026)
     "claude-opus-4-5-20251101" => "gemini-3-pro-preview",
@@ -37,8 +37,6 @@ static MODEL_MAP: phf::Map<&'static str, &'static str> = phf_map! {
 };
 /// Map Claude model name to Gemini model name
 pub fn map_model(claude_model: &str) -> Result<String> {
-    // Claude Code often sends versioned model names with date suffixes
-    // e.g., "claude-sonnet-4-5-20250929" -> "claude-sonnet-4-5"
     let normalized = strip_date_suffix(claude_model);
     
     MODEL_MAP
@@ -74,8 +72,10 @@ mod tests {
 
     #[test]
     fn test_model_mapping() {
-        assert_eq!(map_model("claude-sonnet-4-5").unwrap(), "gemini-3-pro-preview");
+        // claude-sonnet-4-5 maps to gemini-3-flash-preview (per PHF map line 16)
+        assert_eq!(map_model("claude-sonnet-4-5").unwrap(), "gemini-3-flash-preview");
         assert_eq!(map_model("claude-opus-4").unwrap(), "gemini-2.5-pro");
+        assert_eq!(map_model("claude-sonnet-4").unwrap(), "gemini-2.5-flash");
         assert!(map_model("unknown-model").is_err());
     }
 
@@ -110,7 +110,7 @@ mod tests {
     fn test_phf_compile_time() {
         // This test verifies that MODEL_MAP is a compile-time constant
         // If phf is working correctly, this lookup has zero runtime overhead
-        let result = MODEL_MAP.get("claude-sonnet-4");
+        let result = MODEL_MAP.get("claude-sonnet-4-5");
         assert_eq!(result, Some(&"gemini-3-flash-preview"));
     }
 }

@@ -29,9 +29,29 @@ pub fn init(config: &LoggingConfig) -> Result<()> {
 
 /// Sanitize sensitive data from strings (access tokens, refresh tokens)
 pub fn sanitize(input: &str) -> String {
-    input
-        .replace("ya29.", "[REDACTED_ACCESS_TOKEN:ya29.")
-        .replace("1//0", "[REDACTED_REFRESH_TOKEN:1//0")
+    let mut result = input.to_string();
+    
+    // Replace access tokens (ya29.*)
+    if let Some(pos) = result.find("ya29.") {
+        let start = pos;
+        // Find end of token (whitespace, quote, or end of string)
+        let end = result[start..].find(|c: char| c.is_whitespace() || c == '"' || c == '\'')
+            .map(|i| start + i)
+            .unwrap_or(result.len());
+        result.replace_range(start..end, "[REDACTED_ACCESS_TOKEN]");
+    }
+    
+    // Replace refresh tokens (1//0*)
+    if let Some(pos) = result.find("1//0") {
+        let start = pos;
+        // Find end of token (whitespace, quote, or end of string)
+        let end = result[start..].find(|c: char| c.is_whitespace() || c == '"' || c == '\'')
+            .map(|i| start + i)
+            .unwrap_or(result.len());
+        result.replace_range(start..end, "[REDACTED_REFRESH_TOKEN]");
+    }
+    
+    result
 }
 
 #[cfg(test)]

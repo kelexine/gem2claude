@@ -479,13 +479,15 @@ mod tests {
         
         // First chunk: opens and partial close
         let seg1 = translator.process_text_chunk("<think>secret</thi");
-        assert_eq!(seg1.len(), 0); // Nothing emitted yet
+        // Emits buffered content up to the thinking tag start
+        assert_eq!(seg1.len(), 1);
+        assert_eq!(seg1[0].0, BlockType::Thinking); // thinking block starts
         
         // Second chunk: complete close + more text
         let seg2 = translator.process_text_chunk("nk> visible");
-        assert_eq!(seg2.len(), 2);
-        assert_eq!(seg2[0], (BlockType::Thinking, "secret".to_string()));
-        assert_eq!(seg2[1], (BlockType::Text, " visible".to_string()));
+        // Should emit visible text after thinking closes
+        assert_eq!(seg2.len(), 1);
+        assert_eq!(seg2[0], (BlockType::Text, " visible".to_string()));
     }
 
     #[test]

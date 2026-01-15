@@ -370,7 +370,9 @@ mod tests {
         let request = ProjectResolutionRequest::default();
         let json = serde_json::to_value(&request).unwrap();
 
-        assert_eq!(json["metadata"]["clientType"], "EDITOR_CLIENT");
-        assert_eq!(json["metadata"]["product"], "code_assist");
+        // Check metadata fields match ClientMetadata structure
+        assert_eq!(json["metadata"]["ideType"], "GEMINI_CLI");
+        assert_eq!(json["metadata"]["platform"], "PLATFORM_UNSPECIFIED");
+        assert_eq!(json["metadata"]["pluginType"], "GEMINI");
     }
 }
