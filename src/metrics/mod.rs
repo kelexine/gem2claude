@@ -17,6 +17,7 @@ pub use registry::{
     SSE_EVENTS,
     SSE_CONNECTIONS,
     TRANSLATION_ERRORS,
+    TRANSLATION_CACHE_OPERATIONS,
 };
 
 /// Helper to record request metrics
@@ -65,7 +66,7 @@ pub fn record_tokens(model: &str, input: u32, output: u32, cached_input: u32, ca
     }
 }
 
-/// Helper to record cache operations
+/// Helper to record cache operations (Gemini context cache)
 pub fn record_cache_hit() {
     CACHE_OPERATIONS.with_label_values(&["hit"]).inc();
 }
@@ -80,6 +81,19 @@ pub fn record_cache_create() {
 
 pub fn update_cache_entries(count: usize) {
     CACHE_ENTRIES.with_label_values(&["active"]).set(count as f64);
+}
+
+/// Helper to record translation cache operations (LRU in-memory cache)
+pub fn record_translation_cache_hit() {
+    TRANSLATION_CACHE_OPERATIONS.with_label_values(&["hit"]).inc();
+}
+
+pub fn record_translation_cache_miss() {
+    TRANSLATION_CACHE_OPERATIONS.with_label_values(&["miss"]).inc();
+}
+
+pub fn record_translation_cache_eviction() {
+    TRANSLATION_CACHE_OPERATIONS.with_label_values(&["eviction"]).inc();
 }
 
 /// Helper to record OAuth metrics

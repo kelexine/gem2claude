@@ -125,6 +125,13 @@ lazy_static! {
         &["direction", "error_type"], // direction: request, response
         REGISTRY
     ).unwrap();
+
+    /// Translation cache operations (separate from Gemini context cache)
+    pub static ref TRANSLATION_CACHE_OPERATIONS: CounterVec = register_counter_vec_with_registry!(
+        Opts::new("translation_cache_operations_total", "Translation cache operations"),
+        &["operation"], // operation: hit, miss, eviction
+        REGISTRY
+    ).unwrap();
 }
 
 /// Gather all metrics and return as Prometheus text format

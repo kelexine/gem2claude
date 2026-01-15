@@ -143,6 +143,10 @@ impl CacheManager {
     ///
     /// # Error Handling
     /// If translation fails, returns Ok((None, None)) and falls back to normal path.
+    ///
+    /// # Race Condition Note
+    /// Concurrent requests with the same cache key may both translate and insert.
+    /// This is acceptable (just redundant work) - first write wins, no data corruption.
     pub async fn get_or_create_cache(
         &self,
         anthropic_req: &MessagesRequest,
@@ -229,9 +233,22 @@ impl CacheManager {
             Ok(cache_name) => {
                 debug!("Cache created: {}", cache_name);
                 
-                // Store both cache mapping AND translation
+                // Store cache mapping
                 self.cache_map.write().await.insert(cache_key.clone(), cache_name.clone());
-                self.translation_cache.lock().put(cache_key, gemini_request.clone());
+                
+                // Store translation in LRU cache
+                {
+                    // Note: We use manual eviction detection because push() caused inexplicable build failures
+                    let mut translation_cache = self.translation_cache.lock();
+                    
+                    // If cache is full and key is new, an eviction will occur
+                    if translation_cache.len() == translation_cache.cap().get() && !translation_cache.contains(&cache_key) {
+                        debug!("Evicting oldest translation cache entry");
+                        crate::metrics::record_translation_cache_eviction();
+                    }
+                    
+                    translation_cache.put(cache_key, gemini_request.clone());
+                }
                 
                 self.stats.write().await.creates += 1;
                 crate::metrics::record_cache_create();

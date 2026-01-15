@@ -17,8 +17,9 @@ A blazing-fast proxy that lets you use **Claude Code** with Google's Gemini mode
 - 🧠 **Extended Thinking** — Ultrathink support with real-time streaming
 - 👁️ **Vision Support** — Image analysis (JPEG, PNG, WebP, GIF, HEIC up to 100MB)
 - 🔧 **Tool Execution** — File operations, bash commands, browser automation
-- 💾 **Context Caching** — Reduce costs and latency for repeated prompts (75-90% savings)
+- 💾 **Context Caching** — Reduce costs and latency with LRU-backed translation caching
 - 🔒 **Secure** — OAuth with automatic token refresh, no credentials in code
+- 📈 **Observable** — Prometheus metrics endpoint for monitoring cache hit rates and API usage
 
 ## Why gem2claude?
 
@@ -140,6 +141,15 @@ Full support for Claude Code's tool ecosystem:
 - Multi-turn conversations with tool results
 - Automatic thought signature management for Gemini 3.x
 
+### Observability
+
+Comprehensive Prometheus metrics available at `/metrics`:
+
+- `gemini_api_calls_total`: API call counts by model and status
+- `request_duration_seconds`: Latency histograms
+- `translation_cache_operations_total`: Hit/miss/eviction rates for the internal translation cache
+- `cache_operations_total`: Gemini context cache hit/miss/create rates
+
 ## ⚙️ Configuration
 
 Optional environment variables:
@@ -183,7 +193,8 @@ The proxy is built for performance:
 - **90s Idle Timeout** — Connections reused between requests
 - **Minimal Logging** — Hot path optimized for speed
 - **Immediate SSE Flushing** — Real-time streaming with keepalive comments
-- **SHA256 Cache Keys** — Fast in-memory cache lookups
+- **Smart Caching** — LRU in-memory translation cache to skip redundant processing
+- **Deterministic Hashing** — SHA256 cache keys normalized for tool ordering and capability toggles
 
 ## 🔧 Troubleshooting
 
