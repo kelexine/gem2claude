@@ -147,22 +147,36 @@ impl OAuthManager {
             ("grant_type", "refresh_token"),
         ];
 
-        // Call Google OAuth2 token endpoint
+        // Call Google OAuth2 token endpoint with retry
         let client = reqwest::Client::new();
-        let response = client
-            .post("https://oauth2.googleapis.com/token")
-            .form(&params)
-            .send()
-            .await
-            .map_err(|e| ProxyError::OAuthRefresh(format!("HTTP request failed: {}", e)))?;
+        let url = "https://oauth2.googleapis.com/token";
 
-        if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(ProxyError::OAuthRefresh(format!(
-                "Token refresh failed: {}",
-                error_text
-            )));
-        }
+        // Build request logic
+        let request_logic = || async {
+            let response = client
+                .post(url)
+                .form(&params)
+                .send()
+                .await
+                .map_err(|e| (500, format!("HTTP request failed: {}", e)))?;
+
+            let status = response.status();
+            if !status.is_success() {
+                let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                return Err((status.as_u16(), error_text));
+            }
+
+            Ok(response)
+        };
+
+        // Execute with retry
+        let response = crate::utils::retry::with_retry("OAuth Refresh", request_logic)
+            .await
+            .map_err(|(status, body)| match status {
+                429 => ProxyError::TooManyRequests(body),
+                503 | 504 => ProxyError::ServiceUnavailable(body),
+                _ => ProxyError::OAuthRefresh(format!("HTTP {}: {}", status, body)),
+            })?;
 
         // Parse response
         let token_data: serde_json::Value = response

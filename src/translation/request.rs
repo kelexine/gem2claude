@@ -98,6 +98,9 @@ pub async fn translate_request(
         max_output_tokens: Some(max_tokens),
         temperature: anthropic_req.temperature,
         top_p: anthropic_req.top_p,
+        top_k: anthropic_req.top_k,
+        stop_sequences: anthropic_req.stop_sequences,
+        candidate_count: None,
         thinking_config,
     });
 

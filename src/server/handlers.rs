@@ -13,7 +13,7 @@ pub struct HealthResponse {
     pub timestamp: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum HealthStatus {
     Healthy,
@@ -67,6 +67,34 @@ pub async fn health_handler(State(state): State<AppState>) -> Json<HealthRespons
         message: format!("API base: {}", state.config.gemini.api_base_url),
     };
     checks.insert("configuration".to_string(), config_check);
+
+    // Check API connectivity
+    let connectivity_check = match state.gemini_client.check_connectivity().await {
+        Ok(latency) => {
+            let millis = latency.as_millis();
+            let status = if millis > 1000 {
+                if overall_status == HealthStatus::Healthy {
+                    overall_status = HealthStatus::Degraded;
+                }
+                "warning".to_string()
+            } else {
+                "ok".to_string()
+            };
+
+            HealthCheck {
+                status,
+                message: format!("API reachable in {}ms", millis),
+            }
+        }
+        Err(e) => {
+            overall_status = HealthStatus::Unhealthy;
+            HealthCheck {
+                status: "error".to_string(),
+                message: format!("API connectivity failed: {}", e),
+            }
+        }
+    };
+    checks.insert("api_connectivity".to_string(), connectivity_check);
 
     Json(HealthResponse {
         status: overall_status,

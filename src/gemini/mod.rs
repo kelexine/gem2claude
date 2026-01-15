@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 /// Request for project resolution (loadCodeAssist)
 /// Based on Gemini CLI source: packages/core/src/code_assist/types.ts
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectResolutionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -21,7 +21,7 @@ pub struct ProjectResolutionRequest {
 }
 
 /// Client metadata for API requests
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct ClientMetadata {
     #[serde(rename = "ideType", skip_serializing_if = "Option::is_none")]
     pub ide_type: Option<String>,

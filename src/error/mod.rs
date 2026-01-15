@@ -52,6 +52,9 @@ pub enum ProxyError {
 
     #[error("Rate limit exceeded: {0}")]
     TooManyRequests(String),
+
+    #[error("Service unavailable: {0}")]
+    ServiceUnavailable(String),
 }
 
 // Convert ProxyError to HTTP responses for Axum
@@ -66,6 +69,9 @@ impl IntoResponse for ProxyError {
             }
             ProxyError::TooManyRequests(_) => {
                 (StatusCode::TOO_MANY_REQUESTS, "rate_limit_error", self.to_string())
+            }
+            ProxyError::ServiceUnavailable(_) => {
+                (StatusCode::SERVICE_UNAVAILABLE, "api_error", self.to_string())
             }
             ProxyError::Config(_) | ProxyError::ConfigParsing(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "configuration_error", self.to_string())
