@@ -1,6 +1,7 @@
 // OAuth credential management module
 // Author: kelexine (https://github.com/kelexine)
 
+pub mod login;
 mod manager;
 
 pub use manager::OAuthManager;

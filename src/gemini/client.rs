@@ -100,29 +100,62 @@ impl GeminiClient {
                     .map_err(|e| (500, format!("HTTP error: {}", e)))?;
 
                 let status = response.status();
+                let response_text = response.text().await.unwrap_or_default();
+                
                 if !status.is_success() {
-                    let error_text = response.text().await.unwrap_or_default();
-                    return Err((status.as_u16(), error_text));
+                    // Try to extract error message from JSON response
+                    let error_msg = Self::extract_error_message(&response_text)
+                        .unwrap_or_else(|| response_text.clone());
+                    return Err((status.as_u16(), error_msg));
                 }
 
-                let project_response: ProjectResolutionResponse = response
-                    .json()
-                    .await
+                let project_response: ProjectResolutionResponse = serde_json::from_str(&response_text)
                     .map_err(|e| (500, format!("Invalid response: {}", e)))?;
 
                 match project_response.cloudaicompanion_project {
                     Some(project_id) => Ok(project_id),
-                    None => Err((500, "No cloudaicompanionProject in response".to_string())),
+                    None => {
+                        // Check for error in response or provide helpful message
+                        let error_msg = Self::extract_error_message(&response_text)
+                            .unwrap_or_else(|| {
+                                "This Google account doesn't have a Gemini Pro subscription.\n\
+                                 Please login with a Google One AI Premium or Gemini Advanced account,\n\
+                                 or set GOOGLE_CLOUD_PROJECT environment variable for Workspace accounts.".to_string()
+                            });
+                        Err((403, error_msg))
+                    }
                 }
             }
         )
         .await
         .map_err(|(status, body)| match status {
+            403 => ProxyError::ProjectResolution(body),
             429 => ProxyError::TooManyRequests(body),
             529 => ProxyError::Overloaded(format!("Gemini API overloaded: {}", body)),
             503 | 504 => ProxyError::ServiceUnavailable(format!("Upstream unavailable: {}", body)),
             _ => ProxyError::ProjectResolution(format!("HTTP {}: {}", status, body)),
         })
+    }
+    
+    /// Extract error message from API response JSON
+    fn extract_error_message(response_text: &str) -> Option<String> {
+        #[derive(serde::Deserialize)]
+        struct ErrorResponse {
+            error: Option<ErrorDetail>,
+        }
+        
+        #[derive(serde::Deserialize)]
+        struct ErrorDetail {
+            message: Option<String>,
+            status: Option<String>,
+        }
+        
+        if let Ok(error_resp) = serde_json::from_str::<ErrorResponse>(response_text) {
+            if let Some(error) = error_resp.error {
+                return error.message.or(error.status);
+            }
+        }
+        None
     }
 
     /// Get the resolved project ID

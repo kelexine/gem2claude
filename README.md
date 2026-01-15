@@ -25,6 +25,8 @@ A blazing-fast proxy that lets you use **Claude Code** with Google's Gemini mode
 
 > [!NOTE]
 >
+> User Story
+>
 > So, here's the deal: I have a Google Pro plan from last year, which gives you access to Google's latest models (including flagship models like the all-new Gemini 3 Pro/Flash). I want to use AI agents in my local terminal, but the problem is:
 >
 > 1. Google's Gemini CLI is not cutting it for me, and I've heard Claude Code is the king of terminal agents, plus it has a vast tool library, plugins, and community support (led by Anthropic itself).

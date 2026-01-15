@@ -13,8 +13,8 @@ use tracing::{debug, info, warn};
 
 /// Google OAuth2 credentials for Gemini CLI (public, for installed apps)
 /// Source: gemini-cli-0.23.0/packages/core/src/code_assist/oauth2.ts
-const OAUTH_CLIENT_ID: &str = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
-const OAUTH_CLIENT_SECRET: &str = "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";
+pub const OAUTH_CLIENT_ID: &str = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
+pub const OAUTH_CLIENT_SECRET: &str = "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";
 
 #[derive(Clone)]
 pub struct OAuthManager {

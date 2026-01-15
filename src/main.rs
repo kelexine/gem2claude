@@ -2,9 +2,11 @@
 // Author: kelexine (https://github.com/kelexine)
 
 use anyhow::Result;
+use clap::Parser;
+use gem2claude::cli::Args;
 use gem2claude::config::AppConfig;
 use gem2claude::gemini::GeminiClient;
-use gem2claude::oauth::OAuthManager;
+use gem2claude::oauth::{login, OAuthManager};
 use gem2claude::server::create_router;
 use gem2claude::utils::logging;
 use std::net::SocketAddr;
@@ -13,12 +15,20 @@ use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Parse CLI arguments
+    let args = Args::parse();
+
     // Phase 1: Load configuration
     let config = AppConfig::load()?;
     
     // Phase 2: Initialize logging
     logging::init(&config.logging)?;
     info!("Starting gem2claude v{}", env!("CARGO_PKG_VERSION"));
+    
+    // Phase 2.5: Handle --login flag (OAuth flow)
+    if args.login {
+        login::run().await?;
+    }
     
     // Phase 3: Load OAuth credentials
     info!("Loading OAuth credentials from {}", config.oauth.credentials_path);

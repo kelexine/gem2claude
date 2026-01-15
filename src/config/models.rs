@@ -205,7 +205,7 @@ fn default_workers() -> usize {
 fn default_credentials_path() -> String {
     dirs::home_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(".gemini")
+        .join(".gem2claude")
         .join("oauth_creds.json")
         .to_string_lossy()
         .to_string()
