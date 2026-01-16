@@ -44,10 +44,18 @@ pub fn translate_response(
 
     debug!("Response finish_reason: {:?}", candidate.finish_reason);
 
-    // 3. Strip thinking artifacts from parts
+    // 3. Check for malformed function call
+    if let Some("MALFORMED_FUNCTION_CALL") = candidate.finish_reason.as_deref() {
+        return Err(ProxyError::GeminiApi(
+            "Gemini returned MALFORMED_FUNCTION_CALL - the model attempted to call a tool with invalid arguments. \
+             This usually indicates the tool schema is ambiguous or the model misunderstood the tool signature.".to_string()
+        ));
+    }
+
+    // 4. Strip thinking artifacts from parts
     let cleaned_parts = strip_thinking_artifacts(candidate.content.parts)?;
 
-    // 4. Translate to Anthropic content blocks
+    // 5. Translate to Anthropic content blocks
     let content = translate_parts(cleaned_parts)?;
 
     // 5. Map stop reason

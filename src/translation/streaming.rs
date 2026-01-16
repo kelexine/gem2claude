@@ -230,7 +230,20 @@ impl StreamTranslator {
 
                 // Check if this is the final chunk
                 if let Some(finish_reason) = candidate.finish_reason {
+                    // Handle MALFORMED_FUNCTION_CALL as an error
+                    if finish_reason == "MALFORMED_FUNCTION_CALL" {
+                        events.push(StreamEvent::Error {
+                            error: ErrorData {
+                                error_type: "invalid_request_error".to_string(),
+                                message: "Gemini returned MALFORMED_FUNCTION_CALL - the model attempted to call a tool with invalid arguments. \
+                                         This usually indicates the tool schema is ambiguous or the model misunderstood the tool signature.".to_string(),
+                            }
+                        });
+                        return Ok(events);
+                    }
+
                     self.emit_completion(finish_reason, wrapper.usage_metadata, &mut events);
+
                 }
             }
         }
