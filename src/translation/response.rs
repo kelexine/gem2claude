@@ -59,7 +59,8 @@ pub fn translate_response(
         .map(|u| Usage {
             input_tokens: u.prompt_token_count.unwrap_or(0),
             output_tokens: u.candidates_token_count.unwrap_or(0),
-            cache_creation_input_tokens: 0,  // TODO: Track cache creation
+            // Internal API handles cache creation server-side, so this is always 0
+            cache_creation_input_tokens: 0,
             cache_read_input_tokens: u.cached_content_token_count.unwrap_or(0),
         })
         .unwrap_or_default();
