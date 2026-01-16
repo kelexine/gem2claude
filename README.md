@@ -99,13 +99,21 @@ Add to `~/.bashrc` or `~/.zshrc` for persistence.
 
 ### Extended Thinking (Ultrathink)
 
-Use Claude Code's `ultrathink` command for step-by-step reasoning:
+gem2claude detects the **"Ultrathink" keyword** in your messages and automatically enables Gemini's highest thinking level (30k tokens):
 
 ```
-❯ ultrathink: explain this codebase architecture
+❯ Ultrathink: explain this codebase architecture
 ```
 
-The proxy translates Claude's thinking blocks to Gemini's native thinking feature and streams them in real-time.
+**Features:**
+- **Auto-detection**: Case-insensitive keyword scanning in user messages
+- **Highest level**: Forces 30k token thinking budget
+- **Remapped budgets**: LOW→15k, MEDIUM→20k, HIGH→30k tokens
+- **Real-time streaming**: Thinking content streams as it's generated
+
+**Note**: Claude Code v2.1.9+ deprecated native Ultrathink support and now uses max thinking by default. However, gem2claude's detection still works for direct API calls, older clients, and explicit user control.
+
+The proxy translates Gemini's native thinking to Claude's thinking blocks seamlessly.
 
 ### Vision Support
 

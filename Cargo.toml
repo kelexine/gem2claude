@@ -1,6 +1,6 @@
 [package]
 name = "gem2claude"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 authors = ["kelexine <https://github.com/kelexine>"]
 description = "OAuth-based Gemini API to Claude Code Compatible Proxy"

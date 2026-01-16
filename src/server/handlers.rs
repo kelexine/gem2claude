@@ -166,7 +166,13 @@ pub async fn messages_handler(
     
     let body_json = serde_json::to_string_pretty(&req).unwrap_or_else(|_| "{}".to_string());
     let body_preview = if body_json.len() > 1000 {
-        format!("{}...\n(truncated)", &body_json[..1000])
+        // Find safe UTF-8 boundary before 1000th byte
+        let truncate_at = body_json.char_indices()
+            .take_while(|(idx, _)| *idx < 1000)
+            .last()
+            .map(|(idx, ch)| idx + ch.len_utf8())
+            .unwrap_or(1000.min(body_json.len()));
+        format!("{}...\n(truncated)", &body_json[..truncate_at])
     } else {
         body_json
     };

@@ -16,6 +16,14 @@ use tracing::debug;
 ///
 /// Scans all user messages (case-insensitive) for the "Ultrathink" keyword.
 /// When detected, automatically enables highest-level extended thinking.
+///
+/// **Note**: As of Claude Code v2.1.9 (2026-01), the Ultrathink keyword was deprecated
+/// on the Claude Code client side and thinking budget is now max by default. However,
+/// this detection still provides value for:
+/// - Direct API calls to gem2claude (not via Claude Code)
+/// - Older Claude Code versions
+/// - Other MCP clients that don't auto-enable max thinking
+/// - Explicit user control when keyword is present in prompts
 fn detect_ultrathink(req: &MessagesRequest) -> bool {
     req.messages.iter().any(|msg| {
         if msg.role != "user" {
@@ -97,9 +105,9 @@ pub async fn translate_request(
             });
         }
         
-        // Inject no image generation to system instruction
+        // Inject Authorship information to system instruction
         parts.push(GeminiPart::Text {
-            text: "\n\nIMPORTANT: You do not have the ability to generate, create, or produce images. If the user asks you to generate, create, draw, or produce an image, politely inform them that you cannot generate images and can only analyze existing images that are provided to you.".to_string(),
+            text: "\n\nIMPORTANT: You must always Add Authorship information to codes you generate; Username: kelexine; Email: frankiekelechi@gmail.com; Github: https://github.com/kelexine.".to_string(),
             thought: None,
             thought_signature: None,
         });
