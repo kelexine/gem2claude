@@ -11,6 +11,33 @@ use crate::models::mapping::map_model;
 use crate::translation::tools::{translate_tool_result, translate_tool_use, translate_tools};
 use tracing::debug;
 
+
+/// Detect "Ultrathink" keyword in user messages.
+///
+/// Scans all user messages (case-insensitive) for the "Ultrathink" keyword.
+/// When detected, automatically enables highest-level extended thinking.
+fn detect_ultrathink(req: &MessagesRequest) -> bool {
+    req.messages.iter().any(|msg| {
+        if msg.role != "user" {
+            return false;
+        }
+        
+        match &msg.content {
+            MessageContent::Text(text) => {
+                text.to_lowercase().contains("ultrathink")
+            }
+            MessageContent::Blocks(blocks) => {
+                blocks.iter().any(|block| match block {
+                    ContentBlock::Text { text, .. } => {
+                        text.to_lowercase().contains("ultrathink")
+                    }
+                    _ => false,
+                })
+            }
+        }
+    })
+}
+
 /// Translate Anthropic MessagesRequest to Gemini GenerateContentRequest.
 ///
 /// This is the core logical conversion used by the proxy:
@@ -21,7 +48,7 @@ use tracing::debug;
 /// 5. Translates tool definitions
 /// 6. Configures generation parameters
 pub async fn translate_request(
-    anthropic_req: MessagesRequest,
+    mut anthropic_req: MessagesRequest,
     _project_id: &str,
     _cache_manager: Option<&crate::cache::CacheManager>,
     _gemini_client: Option<&crate::gemini::GeminiClient>,
@@ -31,10 +58,21 @@ pub async fn translate_request(
         anthropic_req.model
     );
 
-    // 1. Map model name
+    // 1. Detect Ultrathink keyword and enable extended thinking
+    let has_ultrathink = detect_ultrathink(&anthropic_req);
+    if has_ultrathink {
+        debug!("Ultrathink keyword detected - enabling highest thinking level");
+        // Force highest thinking level when Ultrathink is present
+        anthropic_req.thinking = Some(crate::models::anthropic::ThinkingConfig {
+            type_: "enabled".to_string(),
+            budget_tokens: 30_000, 
+        });
+    }
+
+    // 2. Map model name
     let _gemini_model = map_model(&anthropic_req.model)?;
 
-    // 2. Clamp max_tokens to Gemini's limit (1-65536)
+    // 3. Clamp max_tokens to Gemini's limit (1-65536)
     let max_tokens = anthropic_req.max_tokens.min(65536);
     if anthropic_req.max_tokens > 65536 {
         debug!(
@@ -43,10 +81,10 @@ pub async fn translate_request(
         );
     }
 
-    // 3. Translate messages to contents
+    // 4. Translate messages to contents
     let contents = translate_messages(anthropic_req.messages.clone())?;
 
-    // 3. Translate system instruction and inject image generation limitation
+    // 5. Translate system instruction and inject image generation limitation
     let system_instruction = {
         let mut parts = vec![];
         
@@ -68,7 +106,8 @@ pub async fn translate_request(
         
         Some(SystemInstruction { parts })
     };
-    // 4. Translate thinking config if present
+    
+    // 6. Translate thinking config if present
     let thinking_config = anthropic_req.thinking.as_ref().and_then(|thinking| {
         if thinking.type_ != "enabled" {
             return None;
@@ -79,12 +118,12 @@ pub async fn translate_request(
         let gemini_model = crate::models::mapping::map_model(&anthropic_req.model)
             .unwrap_or_else(|_| anthropic_req.model.clone());
         
-        // Gemini 3.x models use thinking Level enum
+        // Gemini 3.x models use thinking Level enum with remapped budgets
         if gemini_model.contains("gemini-3") {
             let level = match thinking.budget_tokens {
-                0..=10_000 => "LOW",
-                10_001..=20_000 => "MEDIUM",
-                _ => "HIGH",
+                0..=15_000 => "LOW",      
+                15_001..=20_000 => "MEDIUM",  
+                _ => "HIGH",               
             };
             Some(GeminiThinkingConfig {
                 include_thoughts: Some(true),
@@ -92,16 +131,21 @@ pub async fn translate_request(
                 thinking_level: Some(level.to_string()),
             })
         } else {
-            // Gemini 2.5 models use thinkingBudget (token count)
+            // Gemini 2.5 models use thinkingBudget (token count) with remapped values
+            let remapped_budget = match thinking.budget_tokens {
+                0..=15_000 => 15_000,      
+                15_001..=20_000 => 20_000,  
+                _ => 30_000,                
+            };
             Some(GeminiThinkingConfig {
                 include_thoughts: Some(true),
-                thinking_budget: Some(thinking.budget_tokens),
+                thinking_budget: Some(remapped_budget),
                 thinking_level: None,
             })
         }
     });
 
-    // 5. Build generation config
+    // 7. Build generation config
     let generation_config = Some(GenerationConfig {
         max_output_tokens: Some(max_tokens),
         temperature: anthropic_req.temperature,
@@ -112,10 +156,10 @@ pub async fn translate_request(
         thinking_config,
     });
 
-    // 6. Translate tools if present
+    // 8. Translate tools if present
     let tools = anthropic_req.tools.as_ref().map(|t| translate_tools(t.clone()));
     
-    // 6. Set tool_config when tools are present (tells Gemini to wait for function responses)
+    // 9. Set tool_config when tools are present (tells Gemini to wait for function responses)
     let tool_config = if tools.is_some() {
         Some(crate::models::gemini::ToolConfig {
             function_calling_config: crate::models::gemini::FunctionCallingConfig {
@@ -140,7 +184,7 @@ pub async fn translate_request(
         generation_config,
         tools,
         tool_config,
-        cached_content: None,  // NEW: Will be populated by cache manager
+        cached_content: None,
     })
 }
 
