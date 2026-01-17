@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The root configuration object for the application.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
     /// HTTP server settings (host, port, workers).
     #[serde(default)]
@@ -127,17 +127,6 @@ pub struct PerformanceConfig {
 }
 
 // Default trait implementations linking to custom logic
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            server: ServerConfig::default(),
-            oauth: OAuthConfig::default(),
-            gemini: GeminiConfig::default(),
-            logging: LoggingConfig::default(),
-            performance: PerformanceConfig::default(),
-        }
-    }
-}
 
 impl Default for ServerConfig {
     fn default() -> Self {
@@ -246,4 +235,3 @@ fn default_log_format() -> String {
 fn default_pool_size() -> usize {
     100
 }
-

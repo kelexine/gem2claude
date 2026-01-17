@@ -18,6 +18,9 @@ pub use registry::{
     SSE_CONNECTIONS,
     TRANSLATION_ERRORS,
     TRANSLATION_CACHE_OPERATIONS,
+    GEMINI_MODEL_AVAILABILITY,
+    GEMINI_RETRIES,
+    GEMINI_RATE_LIMIT_WAIT_SECONDS,
 };
 
 /// Helper to record request metrics
@@ -119,4 +122,23 @@ pub fn record_sse_connection(status: &str) {
 /// Helper to record translation errors
 pub fn record_translation_error(direction: &str, error_type: &str) {
     TRANSLATION_ERRORS.with_label_values(&[direction, error_type]).inc();
+}
+
+/// Helper to record model availability
+pub fn record_model_health(model: &str, status: &str, unique_statuses: &[&str]) {
+    // Reset other statuses to 0 so we only have one "1" per model
+    for s in unique_statuses {
+        let val = if *s == status { 1.0 } else { 0.0 };
+        GEMINI_MODEL_AVAILABILITY.with_label_values(&[model, s]).set(val);
+    }
+}
+
+/// Helper to record retry attempts
+pub fn record_retry_attempt(model: &str, reason: &str) {
+    GEMINI_RETRIES.with_label_values(&[model, reason]).inc();
+}
+
+/// Helper to record rate limit wait duration
+pub fn record_rate_limit_wait(model: &str, duration_secs: f64) {
+    GEMINI_RATE_LIMIT_WAIT_SECONDS.with_label_values(&[model]).observe(duration_secs);
 }

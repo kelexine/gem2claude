@@ -71,7 +71,7 @@ pub fn translate_image_block(block: &ContentBlock) -> Result<InlineData> {
 
     // Validate image size against Gemini's specific limitations (e.g., 20MB limit)
     validate_image_size(decoded.len())
-        .map_err(|e| ProxyError::InvalidRequest(e))?;
+        .map_err(ProxyError::InvalidRequest)?;
 
     // Gemini expects the base64 data string as-is (without any "data:image/..." URI prefixes)
     Ok(InlineData {
@@ -185,4 +185,3 @@ mod tests {
         assert!(result.is_err());
     }
 }
-

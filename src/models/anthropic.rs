@@ -148,21 +148,21 @@ pub enum ToolResultContent {
     Blocks(Vec<ContentBlock>),
 }
 
-impl ToolResultContent {
-    /// Convert to string for Gemini (which expects string)
-    pub fn to_string(&self) -> String {
+impl std::fmt::Display for ToolResultContent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ToolResultContent::Text(s) => s.clone(),
+            ToolResultContent::Text(s) => write!(f, "{}", s),
             ToolResultContent::Blocks(blocks) => {
                 // Concatenate all text from blocks
-                blocks
+                let text = blocks
                     .iter()
                     .filter_map(|block| match block {
                         ContentBlock::Text { text, .. } => Some(text.as_str()),
                         _ => None,
                     })
                     .collect::<Vec<_>>()
-                    .join("\n")
+                    .join("\n");
+                write!(f, "{}", text)
             }
         }
     }

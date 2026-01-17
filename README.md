@@ -4,7 +4,7 @@
 
 [![Author](https://img.shields.io/badge/Author-kelexine-blue)](https://github.com/kelexine)
 [![License](https://img.shields.io/badge/License-Apache%202.0-green)](LICENSE)
-[![Rust](https://img.shields.io/badge/Rust-1.70+-orange)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/Rust-1.92.0-orange)](https://www.rust-lang.org/)
 
 A blazing-fast proxy that lets you use **Claude Code** with Google's Gemini models through OAuth authentication. No API keys required, just your Google account, whether on free tier or Google AI Pro/Ultra Subscription.
 

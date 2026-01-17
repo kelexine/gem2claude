@@ -22,6 +22,7 @@ pub struct GeminiClient {
     config: GeminiConfig,
     oauth_manager: OAuthManager,
     project_id: String,
+    availability_service: super::ModelAvailabilityService,
 }
 
 impl GeminiClient {
@@ -58,12 +59,15 @@ impl GeminiClient {
         .await?;
 
         info!("Successfully resolved project ID");
+        
+        let availability_service = super::ModelAvailabilityService::new();
 
         Ok(Self {
             http_client,
             config: config.clone(),
             oauth_manager,
             project_id,
+            availability_service,
         })
     }
 
@@ -186,6 +190,13 @@ impl GeminiClient {
         request: crate::models::gemini::GenerateContentRequest,
         model: &str,
     ) -> Result<crate::models::gemini::GenerateContentResponse> {
+        // Track availability state (metrics only)
+        // Note: We don't block based on this status intentionally to allow client retries
+        let is_available = self.availability_service.is_available(model);
+        if !is_available {
+            debug!("Requesting model {} which is marked unavailable/terminal", model);
+        }
+
         let url = format!("{}:generateContent", self.config.api_base_url);
         debug!("Calling generateContent API for model: {}", model);
 
@@ -222,7 +233,22 @@ impl GeminiClient {
                 "Gemini API error: HTTP {} - Response body: {}",
                 status, error_text
             );
+            
+            // Record failure in availability service
+            if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                let reason = if error_text.contains("Daily") { "daily_quota" } else { "rate_limit" };
+                crate::metrics::record_retry_attempt(model, reason);
+                if reason == "daily_quota" {
+                    self.availability_service.mark_terminal(model, error_text.clone());
+                } else {
+                    self.availability_service.mark_retry_once(model, error_text.clone());
+                }
+            } else if status.is_server_error() {
+                crate::metrics::record_retry_attempt(model, "server_error");
+            }
+
             // Return error immediately with proper Claude error type
+            // This aligns with user request to respect client-side retry logic
             return Err(match status.as_u16() {
                 429 => ProxyError::TooManyRequests(format!("Gemini API quota exceeded: {}", error_text)),
                 529 => ProxyError::Overloaded(format!("Gemini API overloaded: {}", error_text)),
@@ -230,6 +256,9 @@ impl GeminiClient {
                 _ => ProxyError::GeminiApi(format!("HTTP {}: {}", status, error_text)),
             });
         }
+
+        // On success, ensure model is marked healthy
+        self.availability_service.mark_healthy(model);
 
         let response_text = response.text().await
             .map_err(|e| ProxyError::GeminiApi(format!("Failed to read response body: {}", e)))?;
@@ -257,6 +286,12 @@ impl GeminiClient {
         request: crate::models::gemini::GenerateContentRequest,
         model: &str,
     ) -> Result<impl futures::Stream<Item = Result<crate::models::gemini::GenerateContentResponse>> + Send> {
+        // Track availability (metrics only)
+        let is_available = self.availability_service.is_available(model);
+        if !is_available {
+             debug!("Streaming model {} which is marked unavailable/terminal", model);
+        }
+
         let url = format!("{}:streamGenerateContent?alt=sse", self.config.api_base_url);
 
         debug!("Calling streamGenerateContent API for model: {}", model);

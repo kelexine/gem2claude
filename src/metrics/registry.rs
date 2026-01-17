@@ -132,6 +132,32 @@ lazy_static! {
         &["operation"], // operation: hit, miss, eviction
         REGISTRY
     ).unwrap();
+
+    // ============================================================================
+    // AVAILABILITY & RATE LIMIT METRICS
+    // ============================================================================
+
+    /// Model availability status (1 = Healthy, 0 = Unhealthy/Terminal)
+    pub static ref GEMINI_MODEL_AVAILABILITY: GaugeVec = register_gauge_vec_with_registry!(
+        Opts::new("gemini_model_availability", "Gemini model availability status (1=Available, 0=Unavailable)"),
+        &["model", "status"], // status: healthy, sticky_retry, terminal
+        REGISTRY
+    ).unwrap();
+
+    /// Retry attempts
+    pub static ref GEMINI_RETRIES: CounterVec = register_counter_vec_with_registry!(
+        Opts::new("gemini_retries_total", "Total retry attempts due to failures"),
+        &["model", "reason"], // reason: 429, 5xx, timeout, etc.
+        REGISTRY
+    ).unwrap();
+
+    /// Rate limit wait times
+    pub static ref GEMINI_RATE_LIMIT_WAIT_SECONDS: HistogramVec = register_histogram_vec_with_registry!(
+        prometheus::HistogramOpts::new("gemini_rate_limit_wait_seconds", "Wait time for rate limiting in seconds")
+            .buckets(vec![1.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0]),
+        &["model"],
+        REGISTRY
+    ).unwrap();
 }
 
 /// Gather all metrics and return as Prometheus text format

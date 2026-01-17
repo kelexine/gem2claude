@@ -4,9 +4,11 @@
 mod client;
 pub mod cache_models;
 pub mod streaming;
+pub mod availability;
 
 pub use client::GeminiClient;
 pub use cache_models::{CreateCachedContentRequest, CachedContentResponse};
+pub use availability::ModelAvailabilityService;
 
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +24,7 @@ pub struct ProjectResolutionRequest {
 
 /// Client metadata for API requests
 #[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct ClientMetadata {
     #[serde(rename = "ideType", skip_serializing_if = "Option::is_none")]
     pub ide_type: Option<String>,
