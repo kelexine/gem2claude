@@ -39,9 +39,9 @@ A blazing-fast proxy that lets you use **Claude Code** with Google's Gemini mode
 
 | Claude Model | Gemini Backend | Context Caching | Best For |
 |--------------|----------------|-----------------|----------|
-| `claude-opus-4-5` | `gemini-3-pro-preview` | ✅ | Complex reasoning, analysis |
-| `claude-sonnet-4-5` | `gemini-3-flash-preview` | ✅ | Coding & code review |
-| `claude-haiku-4-5` | `gemini-2.5-pro` | ✅ | Fastest responses |
+| `claude-opus-4-5` | `gemini-3-pro-preview` | ✅ | Complex reasoning, analysis, Coding |
+| `claude-sonnet-4-5` | `gemini-3-flash-preview` | ✅ | Fast responses & code review |
+| `claude-haiku-4-5` | `gemini-2.5-pro` | ✅ | Past Flagship Model |
 
 ## 🚀 Quick Start
 
@@ -182,7 +182,6 @@ Claude Code CLI
       │
       ▼
 Google Gemini API
-(cloudcode-pa.googleapis.com)
 ```
 
 ## ⚡ Performance Optimizations
@@ -225,10 +224,6 @@ Error: Gemini API quota exceeded: Resource exhausted (quota)
 ```
 
 Wait a moment and retry, or use a different model.
-
-## 🤝 Contributing
-
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## 📄 License
 
