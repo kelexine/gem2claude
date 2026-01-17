@@ -33,14 +33,15 @@ A blazing-fast proxy that lets you use **Claude Code** with Google's Gemini mode
 > 2. Claude Code requires either a paid plan or API subscription which are costly (although worth it), and since I already have a Gemini Pro plan, buying API access or a paid plan on Claude would burn a hole in my pocket (yes, I am that broke) and is kind of a waste of money since I'd be paying twice.
 >
 > So here's where my idea comes in: Claude Code already supports routing API calls to custom endpoints. My plan: Create a tool that serves a Claude Code-compatible API endpoint and routes the API call to Google's Gemini API via OAuth (not the traditional generative API endpoint). The tool connects to the same endpoint that Gemini Code Assist or Gemini CLI uses when authenticated via OAuth.
+> What came out of the plan?: Gemini to Claude Code Proxy (gem2claude) that runs locally and route claude codes api calls to gemini models on google servers and the cycle continues.
 
 ## 📋 Supported Models
 
 | Claude Model | Gemini Backend | Context Caching | Best For |
 |--------------|----------------|-----------------|----------|
 | `claude-opus-4-5` | `gemini-3-pro-preview` | ✅ | Complex reasoning, analysis |
-| `claude-sonnet-4-5` | `gemini-3-pro-preview` | ✅ | Coding & code review |
-| `claude-haiku-4-5` | `gemini-3-flash-preview` | ✅ | Fastest responses |
+| `claude-sonnet-4-5` | `gemini-3-flash-preview` | ✅ | Coding & code review |
+| `claude-haiku-4-5` | `gemini-2.5-pro` | ✅ | Fastest responses |
 
 ## 🚀 Quick Start
 
@@ -52,39 +53,30 @@ cd gem2claude
 cargo build --release
 ```
 
-### 2. Get OAuth Credentials
+### 2. Login to Get OAuth Credentials
 
-You need OAuth credentials from [Gemini CLI](https://github.com/google-gemini/gemini-cli).
+You need OAuth credentials your Google Account
 
-**Install Gemini CLI:**
+**After Build is complete:**
+Simply Run:
 
-With npm:
 ```bash
-npm install -g @google/gemini-cli@latest
+./target/release/gem2claude --login
 ```
-
-With Homebrew (macOS/Linux):
-```bash
-brew install gemini-cli
-```
-
-**Authenticate:**
-```bash
-gemini
-```
-- Choose "Login with Google"
-- Select the account you want to use
 - Follow the authentication flow
 
-After authenticating, `~/.gemini/oauth_creds.json` will be created automatically.
+After authenticating, `~/.gemini/oauth_creds.json` will be created automatically and proxy will start on it's own.
 
-### 3. Run the Proxy
+### 3. Running the Proxy:
+
+On subsiquent runs just run:
 
 ```bash
 ./target/release/gem2claude
 ```
 
 Proxy starts on `http://127.0.0.1:8080`
+OAuth lifecycle is Managed by tge proxy, login once login forever.
 
 ### 4. Configure Claude Code
 
@@ -97,9 +89,9 @@ Add to `~/.bashrc` or `~/.zshrc` for persistence.
 
 ## 🎯 Key Features
 
-### Extended Thinking (Ultrathink)
+### Extended Thinking (Ultrathink) 
 
-gem2claude detects the **"Ultrathink" keyword** in your messages and automatically enables Gemini's highest thinking level (30k tokens):
+gem2claude detects the **"Ultrathink" keyword** in your messages and automatically enables Gemini's highest thinking level (30k+ tokens):
 
 ```
 ❯ Ultrathink: explain this codebase architecture
@@ -107,8 +99,8 @@ gem2claude detects the **"Ultrathink" keyword** in your messages and automatical
 
 **Features:**
 - **Auto-detection**: Case-insensitive keyword scanning in user messages
-- **Highest level**: Forces 30k token thinking budget
-- **Remapped budgets**: LOW→15k, MEDIUM→20k, HIGH→30k tokens
+- **Highest level**: Forces 30k+ token thinking budget
+- **Remapped budgets**: LOW→15k, MEDIUM→20k, HIGH→30k+ tokens
 - **Real-time streaming**: Thinking content streams as it's generated
 
 **Note**: Claude Code v2.1.9+ deprecated native Ultrathink support and now uses max thinking by default. However, gem2claude's detection still works for direct API calls, older clients, and explicit user control.
