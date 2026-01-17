@@ -1,21 +1,36 @@
 // Anthropic SSE streaming event types
 // Author: kelexine (https://github.com/kelexine)
 
-use serde::{Deserialize, Serialize};
 use super::anthropic::{ContentBlock, Usage};
+use serde::{Deserialize, Serialize};
 
 /// All possible Anthropic SSE event types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StreamEvent {
-    MessageStart { message: MessageStart },
-    ContentBlockStart { index: i32, content_block: ContentBlockStart },
+    MessageStart {
+        message: MessageStart,
+    },
+    ContentBlockStart {
+        index: i32,
+        content_block: ContentBlockStart,
+    },
     Ping,
-    ContentBlockDelta { index: i32, delta: Delta },
-    ContentBlockStop { index: i32 },
-    MessageDelta { delta: MessageDeltaData, usage: DeltaUsage },
+    ContentBlockDelta {
+        index: i32,
+        delta: Delta,
+    },
+    ContentBlockStop {
+        index: i32,
+    },
+    MessageDelta {
+        delta: MessageDeltaData,
+        usage: DeltaUsage,
+    },
     MessageStop,
-    Error { error: ErrorData },
+    Error {
+        error: ErrorData,
+    },
 }
 
 /// Message start event payload
@@ -24,7 +39,7 @@ pub struct MessageStart {
     pub id: String,
     #[serde(rename = "type")]
     pub message_type: String, // "message"
-    pub role: String,          // "assistant"
+    pub role: String, // "assistant"
     pub content: Vec<ContentBlock>,
     pub model: String,
     pub stop_reason: Option<String>,
@@ -37,7 +52,7 @@ pub struct MessageStart {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlockStart {
     Text { text: String },
-    Thinking,  // Extended thinking block
+    Thinking, // Extended thinking block
     ToolUse { id: String, name: String },
 }
 
@@ -46,7 +61,7 @@ pub enum ContentBlockStart {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Delta {
     TextDelta { text: String },
-    ThinkingDelta { thinking: String },  // Extended thinking delta
+    ThinkingDelta { thinking: String }, // Extended thinking delta
     SignatureDelta { signature: String }, // Thinking block signature
     InputJsonDelta { partial_json: String },
 }
@@ -140,6 +155,9 @@ mod tests {
     fn test_message_stop_sse_format() {
         let event = StreamEvent::MessageStop;
         let sse = event.to_sse();
-        assert_eq!(sse, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n");
+        assert_eq!(
+            sse,
+            "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+        );
     }
 }

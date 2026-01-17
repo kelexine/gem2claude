@@ -1,14 +1,14 @@
 // Gemini API client module
 // Author: kelexine (https://github.com/kelexine)
 
-mod client;
-pub mod cache_models;
-pub mod streaming;
 pub mod availability;
+pub mod cache_models;
+mod client;
+pub mod streaming;
 
-pub use client::GeminiClient;
-pub use cache_models::{CreateCachedContentRequest, CachedContentResponse};
 pub use availability::ModelAvailabilityService;
+pub use cache_models::{CachedContentResponse, CreateCachedContentRequest};
+pub use client::GeminiClient;
 
 use serde::{Deserialize, Serialize};
 

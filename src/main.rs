@@ -20,37 +20,40 @@ async fn main() -> Result<()> {
 
     // Phase 1: Load configuration
     let config = AppConfig::load()?;
-    
+
     // Phase 2: Initialize logging
     logging::init(&config.logging)?;
     info!("Starting gem2claude v{}", env!("CARGO_PKG_VERSION"));
-    
+
     // Phase 2.5: Handle --login flag (OAuth flow)
     if args.login {
         login::run().await?;
     }
-    
+
     // Phase 3: Load OAuth credentials
-    info!("Loading OAuth credentials from {}", config.oauth.credentials_path);
+    info!(
+        "Loading OAuth credentials from {}",
+        config.oauth.credentials_path
+    );
     let oauth_manager = OAuthManager::new(&config.oauth).await?;
-    
+
     // Phase 4: Resolve project ID (loadCodeAssist handshake)
     info!("Resolving Gemini Cloud Code project ID...");
     let gemini_client = GeminiClient::new(&config.gemini, oauth_manager.clone()).await?;
     info!("Project ID resolved: {}", gemini_client.project_id());
-    
+
     // Phase 5: Build and start HTTP server
     let app = create_router(config.clone(), gemini_client, oauth_manager)?;
     let addr: SocketAddr = format!("{}:{}", config.server.host, config.server.port).parse()?;
-    
+
     info!("Starting server on {}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    
+
     // Phase 6: Run server with graceful shutdown
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
-    
+
     info!("Server shut down gracefully");
     Ok(())
 }

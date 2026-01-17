@@ -90,7 +90,8 @@ fn generate_code_verifier() -> String {
     use ring::rand::{SecureRandom, SystemRandom};
     let rng = SystemRandom::new();
     let mut bytes = [0u8; 32];
-    rng.fill(&mut bytes).expect("Failed to generate random bytes");
+    rng.fill(&mut bytes)
+        .expect("Failed to generate random bytes");
     base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, bytes)
 }
 
@@ -106,7 +107,8 @@ fn generate_state() -> String {
     use ring::rand::{SecureRandom, SystemRandom};
     let rng = SystemRandom::new();
     let mut bytes = [0u8; 32];
-    rng.fill(&mut bytes).expect("Failed to generate random bytes");
+    rng.fill(&mut bytes)
+        .expect("Failed to generate random bytes");
     hex::encode(bytes)
 }
 
@@ -212,16 +214,20 @@ async fn exchange_code_for_tokens(
         id_token: Option<String>,
     }
 
-    let token_response: TokenResponse = response.json().await
+    let token_response: TokenResponse = response
+        .json()
+        .await
         .context("Failed to parse token response")?;
 
-    let expiry_date = chrono::Utc::now().timestamp_millis()
-        + (token_response.expires_in.unwrap_or(3600) * 1000);
+    let expiry_date =
+        chrono::Utc::now().timestamp_millis() + (token_response.expires_in.unwrap_or(3600) * 1000);
 
     Ok(OAuthCredentials {
         access_token: token_response.access_token,
         refresh_token: token_response.refresh_token.unwrap_or_default(),
-        token_type: token_response.token_type.unwrap_or_else(|| "Bearer".to_string()),
+        token_type: token_response
+            .token_type
+            .unwrap_or_else(|| "Bearer".to_string()),
         expiry_date,
         scope: token_response.scope.unwrap_or_default(),
         id_token: token_response.id_token.unwrap_or_default(),

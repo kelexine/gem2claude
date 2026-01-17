@@ -5,10 +5,10 @@
 //!
 //! Author: kelexine (<https://github.com/kelexine>)
 
+use super::models::{validate_image_size, ImageFormat};
 use crate::error::{ProxyError, Result};
 use crate::models::anthropic::{ContentBlock, ImageSource};
 use crate::models::gemini::InlineData;
-use super::models::{ImageFormat, validate_image_size};
 use base64::Engine;
 
 /// Translates a Claude-formatted image content block into Gemini's `InlineData` format.
@@ -38,13 +38,11 @@ pub fn translate_image_block(block: &ContentBlock) -> Result<InlineData> {
     // Extract Image variant details
     let (media_type_opt, data) = match block {
         ContentBlock::Image { source, .. } => match source {
-            ImageSource::Base64 { media_type, data } => {
-                (media_type.clone(), data.clone())
-            }
+            ImageSource::Base64 { media_type, data } => (media_type.clone(), data.clone()),
         },
         _ => {
             return Err(ProxyError::InvalidRequest(
-                "Expected Image content block for vision processing".to_string()
+                "Expected Image content block for vision processing".to_string(),
             ));
         }
     };
@@ -57,21 +55,20 @@ pub fn translate_image_block(block: &ContentBlock) -> Result<InlineData> {
     // Detect MIME type from magic bytes if not provided by the client
     let media_type = match media_type_opt {
         Some(mt) => mt,
-        None => detect_mime_type(&decoded)
-            .ok_or_else(|| ProxyError::InvalidRequest(
-                "Could not detect image format from data. Please provide a media_type.".to_string()
-            ))?,
+        None => detect_mime_type(&decoded).ok_or_else(|| {
+            ProxyError::InvalidRequest(
+                "Could not detect image format from data. Please provide a media_type.".to_string(),
+            )
+        })?,
     };
 
     // Validate that the detected/provided format is supported by the bridge
-    ImageFormat::from_mime_type(&media_type)
-        .ok_or_else(|| {
-            ProxyError::InvalidRequest(format!("Unsupported image format: {}", media_type))
-        })?;
+    ImageFormat::from_mime_type(&media_type).ok_or_else(|| {
+        ProxyError::InvalidRequest(format!("Unsupported image format: {}", media_type))
+    })?;
 
     // Validate image size against Gemini's specific limitations (e.g., 20MB limit)
-    validate_image_size(decoded.len())
-        .map_err(ProxyError::InvalidRequest)?;
+    validate_image_size(decoded.len()).map_err(ProxyError::InvalidRequest)?;
 
     // Gemini expects the base64 data string as-is (without any "data:image/..." URI prefixes)
     Ok(InlineData {
@@ -120,7 +117,7 @@ mod tests {
     fn test_translate_valid_image() {
         // Tiny 1x1 PNG (base64 encoded)
         let png_data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
-        
+
         let image = ContentBlock::Image {
             source: ImageSource::Base64 {
                 media_type: Some("image/png".to_string()),
@@ -131,7 +128,7 @@ mod tests {
 
         let result = translate_image_block(&image);
         assert!(result.is_ok());
-        
+
         let inline_data = result.unwrap();
         assert_eq!(inline_data.mime_type, "image/png");
         assert_eq!(inline_data.data, png_data);
@@ -141,10 +138,10 @@ mod tests {
     fn test_image_without_media_type() {
         // Same PNG but without media_type - should detect it
         let png_data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
-        
+
         let image = ContentBlock::Image {
             source: ImageSource::Base64 {
-                media_type: None,  // Missing!
+                media_type: None, // Missing!
                 data: png_data.to_string(),
             },
             cache_control: None,
@@ -152,9 +149,9 @@ mod tests {
 
         let result = translate_image_block(&image);
         assert!(result.is_ok());
-        
+
         let inline_data = result.unwrap();
-        assert_eq!(inline_data.mime_type, "image/png");  // Should be detected
+        assert_eq!(inline_data.mime_type, "image/png"); // Should be detected
     }
 
     #[test]

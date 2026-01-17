@@ -7,11 +7,10 @@ use crate::models::gemini::{
     FunctionCall, FunctionDeclaration, FunctionResponse, Part as GeminiPart, ToolDeclaration,
 };
 use serde_json::Value;
-use tracing::{debug};
+use tracing::debug;
 
 /// Translate Anthropic tools to Gemini function declarations
 pub fn translate_tools(tools: Vec<AnthropicTool>) -> Vec<ToolDeclaration> {
-
     // CRITICAL: Don't create empty ToolDeclaration - protobuf requires valid tool_type
     if tools.is_empty() {
         debug!("No tools provided, returning empty vec");
@@ -83,12 +82,12 @@ fn remove_keys_impl(value: Value, forbidden: &[&str], inside_properties: bool) -
         Value::Object(mut map) => {
             // Determine if we're entering a "properties" block
             let is_properties_block = inside_properties;
-            
+
             // Remove forbidden keys ONLY if we're not inside a "properties" block
             if !is_properties_block {
                 map.retain(|k, _| !forbidden.contains(&k.as_str()));
             }
-            
+
             // Recursively clean nested objects
             for (key, v) in map.iter_mut() {
                 // Check if this key is "properties" to track context
@@ -127,11 +126,7 @@ fn sanitize_format_field(value: Value) -> Value {
 
             Value::Object(map)
         }
-        Value::Array(arr) => Value::Array(
-            arr.into_iter()
-                .map(sanitize_format_field)
-                .collect(),
-        ),
+        Value::Array(arr) => Value::Array(arr.into_iter().map(sanitize_format_field).collect()),
         other => other,
     }
 }
@@ -193,11 +188,7 @@ fn ensure_type_fields(value: Value) -> Value {
 
             Value::Object(map)
         }
-        Value::Array(arr) => Value::Array(
-            arr.into_iter()
-                .map(ensure_type_fields)
-                .collect(),
-        ),
+        Value::Array(arr) => Value::Array(arr.into_iter().map(ensure_type_fields).collect()),
         other => other,
     }
 }
@@ -211,7 +202,11 @@ pub fn translate_tool_use(id: String, name: String, input: Value) -> GeminiPart 
     // Try to retrieve the original thoughtSignature that Gemini sent with this function call
     let thought_signature = match get_signature(&id) {
         Some(sig) => {
-            debug!("Using stored thoughtSignature for tool_use_id: {} (sig length: {})", id, sig.len());
+            debug!(
+                "Using stored thoughtSignature for tool_use_id: {} (sig length: {})",
+                id,
+                sig.len()
+            );
             Some(sig)
         }
         None => {
@@ -220,17 +215,19 @@ pub fn translate_tool_use(id: String, name: String, input: Value) -> GeminiPart 
             Some("skip_thought_signature_validator".to_string())
         }
     };
-    
-    debug!("Translating tool_use {} -> FunctionCall {} with signature present: {}", 
-        id, name, thought_signature.is_some());
-    
+
+    debug!(
+        "Translating tool_use {} -> FunctionCall {} with signature present: {}",
+        id,
+        name,
+        thought_signature.is_some()
+    );
+
     GeminiPart::FunctionCall {
         function_call: FunctionCall { name, args: input },
         thought_signature,
     }
 }
-
-
 
 /// Translate tool result (Anthropic → Gemini FunctionResponse)
 pub fn translate_tool_result(

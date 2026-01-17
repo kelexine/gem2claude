@@ -13,9 +13,8 @@ static THINKING_REGEX: OnceLock<Regex> = OnceLock::new();
 
 /// Get or initialize the thinking tag regex
 fn get_thinking_regex() -> &'static Regex {
-    THINKING_REGEX.get_or_init(|| {
-        Regex::new(r"(?s)<think>.*?</think>").expect("Invalid regex pattern")
-    })
+    THINKING_REGEX
+        .get_or_init(|| Regex::new(r"(?s)<think>.*?</think>").expect("Invalid regex pattern"))
 }
 
 /// Translate Gemini GenerateContent response to Anthropic MessagesResponse.
@@ -38,9 +37,10 @@ pub fn translate_response(
     })?;
 
     // 2. Get first candidate
-    let candidate = wrapper.candidates.into_iter().next().ok_or_else(|| {
-        ProxyError::Translation("No candidates in Gemini response".to_string())
-    })?;
+    let candidate =
+        wrapper.candidates.into_iter().next().ok_or_else(|| {
+            ProxyError::Translation("No candidates in Gemini response".to_string())
+        })?;
 
     debug!("Response finish_reason: {:?}", candidate.finish_reason);
 
@@ -95,7 +95,11 @@ fn strip_thinking_artifacts(parts: Vec<GeminiPart>) -> Result<Vec<GeminiPart>> {
                 if cleaned.trim().is_empty() {
                     None
                 } else {
-                    Some(Ok(GeminiPart::Text { text: cleaned, thought: None, thought_signature: None }))
+                    Some(Ok(GeminiPart::Text {
+                        text: cleaned,
+                        thought: None,
+                        thought_signature: None,
+                    }))
                 }
             }
             other => Some(Ok(other)),
@@ -118,7 +122,10 @@ pub fn translate_parts(parts: Vec<GeminiPart>) -> Result<Vec<ContentBlock>> {
 /// - FunctionResponse -> Error (should not be in output)
 fn translate_part(part: GeminiPart) -> Result<ContentBlock> {
     match part {
-        GeminiPart::Text { text, .. } => Ok(ContentBlock::Text { text, cache_control: None }),
+        GeminiPart::Text { text, .. } => Ok(ContentBlock::Text {
+            text,
+            cache_control: None,
+        }),
 
         // Extended thinking - translate Gemini thought to Claude thinking block
         GeminiPart::Thought { thought, .. } => {
@@ -129,10 +136,13 @@ fn translate_part(part: GeminiPart) -> Result<ContentBlock> {
         GeminiPart::InlineData { inline_data } => {
             // Gemini can generate images (Imagen) - translate to Claude Image format
             use crate::models::anthropic::ImageSource;
-            
-            tracing::info!("Translating Gemini-generated image: {} ({} bytes)", 
-                inline_data.mime_type, inline_data.data.len());
-            
+
+            tracing::info!(
+                "Translating Gemini-generated image: {} ({} bytes)",
+                inline_data.mime_type,
+                inline_data.data.len()
+            );
+
             Ok(ContentBlock::Image {
                 source: ImageSource::Base64 {
                     media_type: Some(inline_data.mime_type.clone()),
@@ -187,8 +197,7 @@ fn map_stop_reason(_finish_reason: Option<&str>) -> Option<String> {
 mod tests {
     use super::*;
     use crate::models::gemini::{
-        Candidate, Content, FunctionCall, GenerateContentResponse, ResponseWrapper,
-        UsageMetadata,
+        Candidate, Content, FunctionCall, GenerateContentResponse, ResponseWrapper, UsageMetadata,
     };
 
     #[test]

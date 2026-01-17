@@ -20,8 +20,8 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 /// the provided `LoggingConfig`.
 pub fn init(config: &LoggingConfig) -> Result<()> {
     // Configure filter from environment or config file
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(&config.level));
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.level));
 
     match config.format.as_str() {
         "json" => {
@@ -56,28 +56,30 @@ pub fn init(config: &LoggingConfig) -> Result<()> {
 /// A new string where all detected secrets have been replaced.
 pub fn sanitize(input: &str) -> String {
     let mut result = input.to_string();
-    
+
     // Pattern 1: Google OAuth2 Access Tokens
     // These typically start with "ya29."
     if let Some(pos) = result.find("ya29.") {
         let start = pos;
         // Search for the end of the token (delimiter or end of string)
-        let end = result[start..].find(|c: char| c.is_whitespace() || c == '"' || c == '\'')
+        let end = result[start..]
+            .find(|c: char| c.is_whitespace() || c == '"' || c == '\'')
             .map(|i| start + i)
             .unwrap_or(result.len());
         result.replace_range(start..end, "[REDACTED_ACCESS_TOKEN]");
     }
-    
+
     // Pattern 2: Google Refresh Tokens
     // These typically start with "1//0"
     if let Some(pos) = result.find("1//0") {
         let start = pos;
-        let end = result[start..].find(|c: char| c.is_whitespace() || c == '"' || c == '\'')
+        let end = result[start..]
+            .find(|c: char| c.is_whitespace() || c == '"' || c == '\'')
             .map(|i| start + i)
             .unwrap_or(result.len());
         result.replace_range(start..end, "[REDACTED_REFRESH_TOKEN]");
     }
-    
+
     result
 }
 

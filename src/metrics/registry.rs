@@ -3,9 +3,9 @@
 
 use lazy_static::lazy_static;
 use prometheus::{
-    CounterVec, HistogramVec, GaugeVec, Opts, Registry, TextEncoder, Encoder,
-    register_counter_vec_with_registry, register_histogram_vec_with_registry,
-    register_gauge_vec_with_registry,
+    register_counter_vec_with_registry, register_gauge_vec_with_registry,
+    register_histogram_vec_with_registry, CounterVec, Encoder, GaugeVec, HistogramVec, Opts,
+    Registry, TextEncoder,
 };
 
 lazy_static! {
@@ -15,7 +15,7 @@ lazy_static! {
     // ============================================================================
     // REQUEST METRICS
     // ============================================================================
-    
+
     /// Total number of API requests
     pub static ref REQUESTS_TOTAL: CounterVec = register_counter_vec_with_registry!(
         Opts::new("requests_total", "Total number of API requests"),
@@ -34,7 +34,7 @@ lazy_static! {
     // ============================================================================
     // GEMINI API METRICS
     // ============================================================================
-    
+
     /// Total Gemini API calls
     pub static ref GEMINI_API_CALLS: CounterVec = register_counter_vec_with_registry!(
         Opts::new("gemini_api_calls_total", "Total Gemini API calls"),
@@ -53,7 +53,7 @@ lazy_static! {
     // ============================================================================
     // TOKEN METRICS
     // ============================================================================
-    
+
     /// Total tokens processed
     pub static ref TOKENS_TOTAL: CounterVec = register_counter_vec_with_registry!(
         Opts::new("tokens_total", "Total tokens processed"),
@@ -64,7 +64,7 @@ lazy_static! {
     // ============================================================================
     // CACHE METRICS
     // ============================================================================
-    
+
     /// Cache operations
     pub static ref CACHE_OPERATIONS: CounterVec = register_counter_vec_with_registry!(
         Opts::new("cache_operations_total", "Total cache operations"),
@@ -82,7 +82,7 @@ lazy_static! {
     // ============================================================================
     // OAUTH METRICS
     // ============================================================================
-    
+
     /// OAuth token refresh events
     pub static ref OAUTH_REFRESHES: CounterVec = register_counter_vec_with_registry!(
         Opts::new("oauth_token_refreshes_total", "Total OAuth token refreshes"),
@@ -100,7 +100,7 @@ lazy_static! {
     // ============================================================================
     // STREAMING METRICS
     // ============================================================================
-    
+
     /// SSE events sent
     pub static ref SSE_EVENTS: CounterVec = register_counter_vec_with_registry!(
         Opts::new("sse_events_total", "Total SSE events sent"),
@@ -118,7 +118,7 @@ lazy_static! {
     // ============================================================================
     // TRANSLATION METRICS
     // ============================================================================
-    
+
     /// Translation errors
     pub static ref TRANSLATION_ERRORS: CounterVec = register_counter_vec_with_registry!(
         Opts::new("translation_errors_total", "Total translation errors"),
@@ -176,11 +176,16 @@ mod tests {
     #[test]
     fn test_metrics_registration() {
         // Initialize metrics by incrementing a counter (triggers lazy_static)
-        REQUESTS_TOTAL.with_label_values(&["GET", "/test", "200", "test-model"]).inc();
-        
+        REQUESTS_TOTAL
+            .with_label_values(&["GET", "/test", "200", "test-model"])
+            .inc();
+
         // Now gather metrics
         let metrics = gather_metrics();
         assert!(!metrics.is_empty(), "Metrics should be generated");
-        assert!(metrics.contains("requests_total"), "Should contain requests_total metric");
+        assert!(
+            metrics.contains("requests_total"),
+            "Should contain requests_total metric"
+        );
     }
 }

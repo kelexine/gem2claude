@@ -5,14 +5,14 @@
 // in conversation history. This module tracks the mapping from tool_use_id to
 // the original thoughtSignature returned by Gemini.
 
+use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::sync::RwLock;
-use once_cell::sync::Lazy;
 use tracing::debug;
 
 /// Global storage for tool_use_id → thoughtSignature mappings
 /// Uses RwLock for thread-safe concurrent access
-static SIGNATURE_STORE: Lazy<RwLock<HashMap<String, String>>> = 
+static SIGNATURE_STORE: Lazy<RwLock<HashMap<String, String>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
 /// Store a thoughtSignature for a given tool_use_id
@@ -34,9 +34,15 @@ pub fn get_signature(tool_use_id: &str) -> Option<String> {
     if let Ok(store) = SIGNATURE_STORE.read() {
         let sig = store.get(tool_use_id).cloned();
         if sig.is_some() {
-            debug!("Found stored thoughtSignature for tool_use_id: {}", tool_use_id);
+            debug!(
+                "Found stored thoughtSignature for tool_use_id: {}",
+                tool_use_id
+            );
         } else {
-            debug!("No stored thoughtSignature for tool_use_id: {}", tool_use_id);
+            debug!(
+                "No stored thoughtSignature for tool_use_id: {}",
+                tool_use_id
+            );
         }
         sig
     } else {
@@ -74,9 +80,9 @@ mod tests {
     fn test_store_and_retrieve() {
         let tool_id = "toolu_test_123";
         let signature = "CiQBjz1rX...test_signature";
-        
+
         store_signature(tool_id, signature);
-        
+
         let retrieved = get_signature(tool_id);
         assert_eq!(retrieved, Some(signature.to_string()));
     }

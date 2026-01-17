@@ -10,7 +10,7 @@
 use backoff::{backoff::Backoff, ExponentialBackoff};
 use serde_json::Value;
 use std::time::Duration;
-use tracing::{debug};
+use tracing::debug;
 
 /// Parses Google's `retryDelay` duration from a JSON error response.
 ///
@@ -26,10 +26,10 @@ use tracing::{debug};
 /// `Some(Duration)` if a valid `retryDelay` was found, otherwise `None`.
 pub fn parse_retry_delay(error_json: &str) -> Option<Duration> {
     let parsed: Value = serde_json::from_str(error_json).ok()?;
-    
+
     // Navigate the Google RPC error structure: error.details[] -> RetryInfo -> retryDelay
     let details = parsed.get("error")?.get("details")?.as_array()?;
-    
+
     for detail in details {
         if detail.get("@type")?.as_str()? == "type.googleapis.com/google.rpc.RetryInfo" {
             if let Some(retry_delay) = detail.get("retryDelay").and_then(|v| v.as_str()) {
@@ -37,7 +37,7 @@ pub fn parse_retry_delay(error_json: &str) -> Option<Duration> {
             }
         }
     }
-    
+
     None
 }
 
@@ -49,10 +49,10 @@ fn parse_duration_string(duration_str: &str) -> Option<Duration> {
     // Expected format: <float>s
     let seconds_str = duration_str.strip_suffix('s')?;
     let seconds: f64 = seconds_str.parse().ok()?;
-    
+
     // Safety cap: never wait more than 60s regardless of what the API says
     let capped_seconds = seconds.min(60.0);
-    
+
     let millis = (capped_seconds * 1000.0) as u64;
     Some(Duration::from_millis(millis))
 }
@@ -116,7 +116,7 @@ where
 
     loop {
         attempt += 1;
-        
+
         match operation().await {
             Ok(result) => {
                 if attempt > 1 {
@@ -131,22 +131,27 @@ where
                 }
 
                 // Calculate wait duration
-                let delay = if let Some(google_delay) = parse_retry_delay(&error_body) {
-                    // API explicitly told us how long to wait
-                    debug!(
+                let delay =
+                    if let Some(google_delay) = parse_retry_delay(&error_body) {
+                        // API explicitly told us how long to wait
+                        debug!(
                         "{} failed with {} (attempt {}), using Google's suggested delay of {}ms",
                         operation_name, status, attempt, google_delay.as_millis()
                     );
-                    google_delay
-                } else {
-                    // Fall back to autonomous exponential backoff
-                    let backoff_delay = backoff.next_backoff().unwrap_or(Duration::from_secs(30));
-                    debug!(
-                        "{} failed with {} (attempt {}), retrying after backoff of {}ms",
-                        operation_name, status, attempt, backoff_delay.as_millis()
-                    );
-                    backoff_delay
-                };
+                        google_delay
+                    } else {
+                        // Fall back to autonomous exponential backoff
+                        let backoff_delay =
+                            backoff.next_backoff().unwrap_or(Duration::from_secs(30));
+                        debug!(
+                            "{} failed with {} (attempt {}), retrying after backoff of {}ms",
+                            operation_name,
+                            status,
+                            attempt,
+                            backoff_delay.as_millis()
+                        );
+                        backoff_delay
+                    };
 
                 tokio::time::sleep(delay).await;
             }
@@ -181,7 +186,7 @@ mod tests {
         assert_eq!(parse_duration_string("40s").unwrap().as_secs(), 40);
         assert_eq!(parse_duration_string("1.5s").unwrap().as_millis(), 1500);
         assert_eq!(parse_duration_string("0.123s").unwrap().as_millis(), 123);
-        
+
         // Test safety cap at 60s
         assert_eq!(parse_duration_string("120s").unwrap().as_secs(), 60);
     }
@@ -196,4 +201,3 @@ mod tests {
         assert!(!is_retryable(404));
     }
 }
-

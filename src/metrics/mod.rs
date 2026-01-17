@@ -4,31 +4,24 @@
 mod registry;
 
 pub use registry::{
-    gather_metrics,
-    REQUESTS_TOTAL,
-    REQUEST_DURATION,
-    GEMINI_API_CALLS,
-    GEMINI_API_DURATION,
-    TOKENS_TOTAL,
-    CACHE_OPERATIONS,
-    CACHE_ENTRIES,
-    OAUTH_REFRESHES,
-    OAUTH_TOKEN_EXPIRY,
-    SSE_EVENTS,
-    SSE_CONNECTIONS,
-    TRANSLATION_ERRORS,
-    TRANSLATION_CACHE_OPERATIONS,
-    GEMINI_MODEL_AVAILABILITY,
-    GEMINI_RETRIES,
-    GEMINI_RATE_LIMIT_WAIT_SECONDS,
+    gather_metrics, CACHE_ENTRIES, CACHE_OPERATIONS, GEMINI_API_CALLS, GEMINI_API_DURATION,
+    GEMINI_MODEL_AVAILABILITY, GEMINI_RATE_LIMIT_WAIT_SECONDS, GEMINI_RETRIES, OAUTH_REFRESHES,
+    OAUTH_TOKEN_EXPIRY, REQUESTS_TOTAL, REQUEST_DURATION, SSE_CONNECTIONS, SSE_EVENTS,
+    TOKENS_TOTAL, TRANSLATION_CACHE_OPERATIONS, TRANSLATION_ERRORS,
 };
 
 /// Helper to record request metrics
-pub fn record_request(method: &str, endpoint: &str, status_code: u16, model: &str, duration_secs: f64) {
+pub fn record_request(
+    method: &str,
+    endpoint: &str,
+    status_code: u16,
+    model: &str,
+    duration_secs: f64,
+) {
     REQUESTS_TOTAL
         .with_label_values(&[method, endpoint, &status_code.to_string(), model])
         .inc();
-    
+
     REQUEST_DURATION
         .with_label_values(&[method, endpoint, &status_code.to_string()])
         .observe(duration_secs);
@@ -39,7 +32,7 @@ pub fn record_gemini_call(model: &str, status_code: u16, streaming: bool, durati
     GEMINI_API_CALLS
         .with_label_values(&[model, &status_code.to_string(), &streaming.to_string()])
         .inc();
-    
+
     GEMINI_API_DURATION
         .with_label_values(&[model, &streaming.to_string()])
         .observe(duration_secs);
@@ -83,20 +76,28 @@ pub fn record_cache_create() {
 }
 
 pub fn update_cache_entries(count: usize) {
-    CACHE_ENTRIES.with_label_values(&["active"]).set(count as f64);
+    CACHE_ENTRIES
+        .with_label_values(&["active"])
+        .set(count as f64);
 }
 
 /// Helper to record translation cache operations (LRU in-memory cache)
 pub fn record_translation_cache_hit() {
-    TRANSLATION_CACHE_OPERATIONS.with_label_values(&["hit"]).inc();
+    TRANSLATION_CACHE_OPERATIONS
+        .with_label_values(&["hit"])
+        .inc();
 }
 
 pub fn record_translation_cache_miss() {
-    TRANSLATION_CACHE_OPERATIONS.with_label_values(&["miss"]).inc();
+    TRANSLATION_CACHE_OPERATIONS
+        .with_label_values(&["miss"])
+        .inc();
 }
 
 pub fn record_translation_cache_eviction() {
-    TRANSLATION_CACHE_OPERATIONS.with_label_values(&["eviction"]).inc();
+    TRANSLATION_CACHE_OPERATIONS
+        .with_label_values(&["eviction"])
+        .inc();
 }
 
 /// Helper to record OAuth metrics
@@ -107,7 +108,9 @@ pub fn record_oauth_refresh(success: bool) {
 
 pub fn update_oauth_expiry(seconds: i64) {
     let status = if seconds > 0 { "valid" } else { "expired" };
-    OAUTH_TOKEN_EXPIRY.with_label_values(&[status]).set(seconds as f64);
+    OAUTH_TOKEN_EXPIRY
+        .with_label_values(&[status])
+        .set(seconds as f64);
 }
 
 /// Helper to record SSE events
@@ -121,7 +124,9 @@ pub fn record_sse_connection(status: &str) {
 
 /// Helper to record translation errors
 pub fn record_translation_error(direction: &str, error_type: &str) {
-    TRANSLATION_ERRORS.with_label_values(&[direction, error_type]).inc();
+    TRANSLATION_ERRORS
+        .with_label_values(&[direction, error_type])
+        .inc();
 }
 
 /// Helper to record model availability
@@ -129,7 +134,9 @@ pub fn record_model_health(model: &str, status: &str, unique_statuses: &[&str]) 
     // Reset other statuses to 0 so we only have one "1" per model
     for s in unique_statuses {
         let val = if *s == status { 1.0 } else { 0.0 };
-        GEMINI_MODEL_AVAILABILITY.with_label_values(&[model, s]).set(val);
+        GEMINI_MODEL_AVAILABILITY
+            .with_label_values(&[model, s])
+            .set(val);
     }
 }
 
@@ -140,5 +147,7 @@ pub fn record_retry_attempt(model: &str, reason: &str) {
 
 /// Helper to record rate limit wait duration
 pub fn record_rate_limit_wait(model: &str, duration_secs: f64) {
-    GEMINI_RATE_LIMIT_WAIT_SECONDS.with_label_values(&[model]).observe(duration_secs);
+    GEMINI_RATE_LIMIT_WAIT_SECONDS
+        .with_label_values(&[model])
+        .observe(duration_secs);
 }

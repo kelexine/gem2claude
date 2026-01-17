@@ -7,7 +7,7 @@ use crate::error::{ProxyError, Result};
 use crate::oauth::OAuthManager;
 use reqwest::Client;
 use std::time::Duration;
-use tracing::{debug, info, error};
+use tracing::{debug, error, info};
 
 /// Client for the Google Gemini API.
 ///
@@ -18,7 +18,7 @@ use tracing::{debug, info, error};
 /// - Project ID resolution
 pub struct GeminiClient {
     http_client: Client,
-    #[allow(dead_code)] 
+    #[allow(dead_code)]
     config: GeminiConfig,
     oauth_manager: OAuthManager,
     project_id: String,
@@ -32,10 +32,7 @@ impl GeminiClient {
     /// 1. Configure an optimized HTTP client with connection pooling
     /// 2. Authenticate using the OAuth manager
     /// 3. Call the `loadCodeAssist` endpoint to resolve the GCP project ID
-    pub async fn new(
-        config: &GeminiConfig,
-        oauth_manager: OAuthManager,
-    ) -> Result<Self> {
+    pub async fn new(config: &GeminiConfig, oauth_manager: OAuthManager) -> Result<Self> {
         // Configure HTTP client for optimal streaming performance
         let http_client = Client::builder()
             .timeout(Duration::from_secs(config.timeout_seconds))
@@ -51,15 +48,11 @@ impl GeminiClient {
         debug!("Created HTTP client with connection pooling and keep-alive");
 
         // Resolve project ID via loadCodeAssist
-        let project_id = Self::resolve_project_id(
-            &http_client,
-            &config.api_base_url,
-            &oauth_manager,
-        )
-        .await?;
+        let project_id =
+            Self::resolve_project_id(&http_client, &config.api_base_url, &oauth_manager).await?;
 
         info!("Successfully resolved project ID");
-        
+
         let availability_service = super::ModelAvailabilityService::new();
 
         Ok(Self {
@@ -105,7 +98,6 @@ impl GeminiClient {
 
                 let status = response.status();
                 let response_text = response.text().await.unwrap_or_default();
-                
                 if !status.is_success() {
                     // Try to extract error message from JSON response
                     let error_msg = Self::extract_error_message(&response_text)
@@ -140,20 +132,20 @@ impl GeminiClient {
             _ => ProxyError::ProjectResolution(format!("HTTP {}: {}", status, body)),
         })
     }
-    
+
     /// Extract error message from API response JSON
     fn extract_error_message(response_text: &str) -> Option<String> {
         #[derive(serde::Deserialize)]
         struct ErrorResponse {
             error: Option<ErrorDetail>,
         }
-        
+
         #[derive(serde::Deserialize)]
         struct ErrorDetail {
             message: Option<String>,
             status: Option<String>,
         }
-        
+
         if let Ok(error_resp) = serde_json::from_str::<ErrorResponse>(response_text) {
             if let Some(error) = error_resp.error {
                 return error.message.or(error.status);
@@ -194,7 +186,10 @@ impl GeminiClient {
         // Note: We don't block based on this status intentionally to allow client retries
         let is_available = self.availability_service.is_available(model);
         if !is_available {
-            debug!("Requesting model {} which is marked unavailable/terminal", model);
+            debug!(
+                "Requesting model {} which is marked unavailable/terminal",
+                model
+            );
         }
 
         let url = format!("{}:generateContent", self.config.api_base_url);
@@ -212,7 +207,8 @@ impl GeminiClient {
         let start_time = std::time::Instant::now();
         let access_token = self.oauth_manager.get_token().await?;
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .post(&url)
             .header("Authorization", format!("Bearer {}", access_token))
             .header("Content-Type", "application/json")
@@ -223,7 +219,7 @@ impl GeminiClient {
 
         let duration = start_time.elapsed().as_secs_f64();
         let status = response.status();
-        
+
         // Record API call metric
         crate::metrics::record_gemini_call(model, status.as_u16(), false, duration);
 
@@ -233,15 +229,21 @@ impl GeminiClient {
                 "Gemini API error: HTTP {} - Response body: {}",
                 status, error_text
             );
-            
+
             // Record failure in availability service
             if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                let reason = if error_text.contains("Daily") { "daily_quota" } else { "rate_limit" };
+                let reason = if error_text.contains("Daily") {
+                    "daily_quota"
+                } else {
+                    "rate_limit"
+                };
                 crate::metrics::record_retry_attempt(model, reason);
                 if reason == "daily_quota" {
-                    self.availability_service.mark_terminal(model, error_text.clone());
+                    self.availability_service
+                        .mark_terminal(model, error_text.clone());
                 } else {
-                    self.availability_service.mark_retry_once(model, error_text.clone());
+                    self.availability_service
+                        .mark_retry_once(model, error_text.clone());
                 }
             } else if status.is_server_error() {
                 crate::metrics::record_retry_attempt(model, "server_error");
@@ -250,9 +252,14 @@ impl GeminiClient {
             // Return error immediately with proper Claude error type
             // This aligns with user request to respect client-side retry logic
             return Err(match status.as_u16() {
-                429 => ProxyError::TooManyRequests(format!("Gemini API quota exceeded: {}", error_text)),
+                429 => ProxyError::TooManyRequests(format!(
+                    "Gemini API quota exceeded: {}",
+                    error_text
+                )),
                 529 => ProxyError::Overloaded(format!("Gemini API overloaded: {}", error_text)),
-                503 | 504 => ProxyError::ServiceUnavailable(format!("Upstream unavailable: {}", error_text)),
+                503 | 504 => {
+                    ProxyError::ServiceUnavailable(format!("Upstream unavailable: {}", error_text))
+                }
                 _ => ProxyError::GeminiApi(format!("HTTP {}: {}", status, error_text)),
             });
         }
@@ -260,15 +267,18 @@ impl GeminiClient {
         // On success, ensure model is marked healthy
         self.availability_service.mark_healthy(model);
 
-        let response_text = response.text().await
+        let response_text = response
+            .text()
+            .await
             .map_err(|e| ProxyError::GeminiApi(format!("Failed to read response body: {}", e)))?;
 
-        debug!("Raw Gemini response (first 500 chars): {}",
-            response_text.chars().take(500).collect::<String>());
+        debug!(
+            "Raw Gemini response (first 500 chars): {}",
+            response_text.chars().take(500).collect::<String>()
+        );
 
         let gemini_response: crate::models::gemini::GenerateContentResponse =
-            serde_json::from_str(&response_text)
-            .map_err(|e| {
+            serde_json::from_str(&response_text).map_err(|e| {
                 error!("Failed to parse Gemini response: {}", e);
                 error!("Response body: {}", response_text);
                 ProxyError::GeminiApi(format!("Response parsing error: {}", e))
@@ -285,11 +295,16 @@ impl GeminiClient {
         &self,
         request: crate::models::gemini::GenerateContentRequest,
         model: &str,
-    ) -> Result<impl futures::Stream<Item = Result<crate::models::gemini::GenerateContentResponse>> + Send> {
+    ) -> Result<
+        impl futures::Stream<Item = Result<crate::models::gemini::GenerateContentResponse>> + Send,
+    > {
         // Track availability (metrics only)
         let is_available = self.availability_service.is_available(model);
         if !is_available {
-             debug!("Streaming model {} which is marked unavailable/terminal", model);
+            debug!(
+                "Streaming model {} which is marked unavailable/terminal",
+                model
+            );
         }
 
         let url = format!("{}:streamGenerateContent?alt=sse", self.config.api_base_url);
@@ -327,17 +342,20 @@ impl GeminiClient {
         system_instruction: Option<crate::models::gemini::SystemInstruction>,
         contents: Vec<crate::models::gemini::Content>,
     ) -> Result<String> {
-        use crate::gemini::cache_models::{CreateCachedContentRequest, CachedContentResponse};
+        use crate::gemini::cache_models::{CachedContentResponse, CreateCachedContentRequest};
 
-        let url = format!("{}/cachedContents", self.config.api_base_url.trim_end_matches("/v1internal"));
-        
+        let url = format!(
+            "{}/cachedContents",
+            self.config.api_base_url.trim_end_matches("/v1internal")
+        );
+
         debug!("Creating cache for model: {}", model);
 
         let request = CreateCachedContentRequest {
             model: model.to_string(),
             system_instruction,
             contents,
-            ttl: Some("300s".to_string()),  // 5 minutes
+            ttl: Some("300s".to_string()), // 5 minutes
         };
 
         debug!("Creating cache for model: {}", model);
@@ -348,36 +366,35 @@ impl GeminiClient {
         let request = request.clone();
         let oauth_manager = self.oauth_manager.clone();
 
-        crate::utils::retry::with_retry(
-            "Create Cache",
-            || async {
-                let access_token = oauth_manager.get_token().await
-                    .map_err(|e| (500, format!("OAuth error: {}", e)))?;
+        crate::utils::retry::with_retry("Create Cache", || async {
+            let access_token = oauth_manager
+                .get_token()
+                .await
+                .map_err(|e| (500, format!("OAuth error: {}", e)))?;
 
-                let response = http_client
-                    .post(&url)
-                    .header("Authorization", format!("Bearer {}", access_token))
-                    .header("Content-Type", "application/json")
-                    .json(&request)
-                    .send()
-                    .await
-                    .map_err(|e| (500, format!("HTTP error: {}", e)))?;
+            let response = http_client
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", access_token))
+                .header("Content-Type", "application/json")
+                .json(&request)
+                .send()
+                .await
+                .map_err(|e| (500, format!("HTTP error: {}", e)))?;
 
-                let status = response.status();
-                if !status.is_success() {
-                    let error_text = response.text().await.unwrap_or_default();
-                    error!("Cache creation failed: HTTP {} - {}", status, error_text);
-                    return Err((status.as_u16(), error_text));
-                }
-
-                let cache_response: CachedContentResponse = response
-                    .json()
-                    .await
-                    .map_err(|e| (500, format!("Invalid response: {}", e)))?;
-
-                Ok(cache_response)
+            let status = response.status();
+            if !status.is_success() {
+                let error_text = response.text().await.unwrap_or_default();
+                error!("Cache creation failed: HTTP {} - {}", status, error_text);
+                return Err((status.as_u16(), error_text));
             }
-        )
+
+            let cache_response: CachedContentResponse = response
+                .json()
+                .await
+                .map_err(|e| (500, format!("Invalid response: {}", e)))?;
+
+            Ok(cache_response)
+        })
         .await
         .map_err(|(status, body)| match status {
             429 => ProxyError::TooManyRequests(body),
@@ -435,12 +452,13 @@ impl GeminiClient {
 
         let access_token = self.oauth_manager.get_token().await?;
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .post(&url)
             .header("Authorization", format!("Bearer {}", access_token))
             .header("Content-Type", "application/json")
             .json(&wrapped_request)
-            .timeout(Duration::from_secs(5))  // Short timeout for health checks
+            .timeout(Duration::from_secs(5)) // Short timeout for health checks
             .send()
             .await
             .map_err(|e| ProxyError::GeminiApi(format!("Health check request failed: {}", e)))?;
@@ -448,12 +466,15 @@ impl GeminiClient {
         let status = response.status();
         if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(ProxyError::GeminiApi(format!("API check failed: {}", error_text)));
+            return Err(ProxyError::GeminiApi(format!(
+                "API check failed: {}",
+                error_text
+            )));
         }
 
         let latency = start.elapsed();
         debug!("API connectivity check passed in {:?}", latency);
-        
+
         Ok(latency)
     }
 }

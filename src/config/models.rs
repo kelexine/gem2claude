@@ -13,19 +13,19 @@ pub struct AppConfig {
     /// HTTP server settings (host, port, workers).
     #[serde(default)]
     pub server: ServerConfig,
-    
+
     /// OAuth2 authentication settings.
     #[serde(default)]
     pub oauth: OAuthConfig,
-    
+
     /// Upstream Gemini API settings.
     #[serde(default)]
     pub gemini: GeminiConfig,
-    
+
     /// Logging and observability settings.
     #[serde(default)]
     pub logging: LoggingConfig,
-    
+
     /// Performance and resource management settings.
     #[serde(default)]
     pub performance: PerformanceConfig,
@@ -38,12 +38,12 @@ pub struct ServerConfig {
     /// Default: `127.0.0.1`
     #[serde(default = "default_host")]
     pub host: String,
-    
+
     /// The port number the server should listen on.
     /// Default: `8080`
     #[serde(default = "default_port")]
     pub port: u16,
-    
+
     /// Number of worker threads for the Axum server.
     /// Default: Number of logical CPU cores.
     #[serde(default = "default_workers")]
@@ -57,12 +57,12 @@ pub struct OAuthConfig {
     /// Default: `~/.gemini/oauth_creds.json`
     #[serde(default = "default_credentials_path")]
     pub credentials_path: String,
-    
+
     /// Whether to automatically refresh the access token before it expires.
     /// Default: `true`
     #[serde(default = "default_true")]
     pub auto_refresh: bool,
-    
+
     /// Number of seconds before expiration to trigger a token refresh.
     /// Default: `300` (5 minutes)
     #[serde(default = "default_refresh_buffer")]
@@ -76,17 +76,17 @@ pub struct GeminiConfig {
     /// Default: Google's Cloud Code internal API base.
     #[serde(default = "default_api_base_url")]
     pub api_base_url: String,
-    
+
     /// The default Gemini model to use if none is specified by the client.
     /// Default: `gemini-3-flash-preview`
     #[serde(default = "default_model")]
     pub default_model: String,
-    
+
     /// Connection and request timeout in seconds.
     /// Default: `300` (5 minutes)
     #[serde(default = "default_timeout")]
     pub timeout_seconds: u64,
-    
+
     /// Maximum number of times to retry failed API requests.
     /// Default: `3`
     #[serde(default = "default_max_retries")]
@@ -100,12 +100,12 @@ pub struct LoggingConfig {
     /// Default: `info`
     #[serde(default = "default_log_level")]
     pub level: String,
-    
+
     /// Output format for logs (`pretty`, `json`, `compact`).
     /// Default: `pretty`
     #[serde(default = "default_log_format")]
     pub format: String,
-    
+
     /// Whether to mask sensitive tokens and credentials in logs.
     /// Default: `true`
     #[serde(default = "default_true")]
@@ -119,7 +119,7 @@ pub struct PerformanceConfig {
     /// Default: `100`
     #[serde(default = "default_pool_size")]
     pub connection_pool_size: usize,
-    
+
     /// Whether to enable GZIP/Brotli compression for HTTP responses.
     /// Default: `true`
     #[serde(default = "default_true")]

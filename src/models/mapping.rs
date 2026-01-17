@@ -10,35 +10,35 @@ static MODEL_MAP: phf::Map<&'static str, &'static str> = phf_map! {
     "claude-opus-4-5-20251101" => "gemini-3-pro-preview",
     "claude-opus-4.5" => "gemini-3-pro-preview",
     "claude-opus-4-5" => "gemini-3-pro-preview",
-    
+
     "claude-sonnet-4-5-20250929" => "gemini-3-flash-preview",
     "claude-sonnet-4.5" => "gemini-3-flash-preview",
     "claude-sonnet-4-5" => "gemini-3-flash-preview",
-    
+
     "claude-haiku-4-5-20251001" => "gemini-2.5-pro",
     "claude-haiku-4.5" => "gemini-2.5-pro",
     "claude-haiku-4-5" => "gemini-2.5-pro",
-    
+
     // Claude 4/4.1 Generation (May 2025 - Aug 2025)
     "claude-opus-4-1-20250805" => "gemini-2.5-pro",
     "claude-opus-4.1" => "gemini-2.5-pro",
     "claude-opus-4-1" => "gemini-2.5-pro",
-    
+
     "claude-opus-4-20250514" => "gemini-2.5-pro",
     "claude-opus-4" => "gemini-2.5-pro",
-    
+
     "claude-sonnet-4-20250514" => "gemini-2.5-flash",
     "claude-sonnet-4" => "gemini-2.5-flash",
-    
+
     // Claude 3.7 Generation (Feb 2025 - Mar 2025)
     "claude-3-7-sonnet-20250224" => "gemini-2.5-flash-lite",
     "claude-3.7-sonnet" => "gemini-2.5-flash-lite",
-    
+
 };
 /// Map Claude model name to Gemini model name
 pub fn map_model(claude_model: &str) -> Result<String> {
     let normalized = strip_date_suffix(claude_model);
-    
+
     MODEL_MAP
         .get(&normalized as &str)
         .map(|s| s.to_string())
@@ -73,7 +73,10 @@ mod tests {
     #[test]
     fn test_model_mapping() {
         // claude-sonnet-4-5 maps to gemini-3-flash-preview (per PHF map line 16)
-        assert_eq!(map_model("claude-sonnet-4-5").unwrap(), "gemini-3-flash-preview");
+        assert_eq!(
+            map_model("claude-sonnet-4-5").unwrap(),
+            "gemini-3-flash-preview"
+        );
         assert_eq!(map_model("claude-opus-4").unwrap(), "gemini-2.5-pro");
         assert_eq!(map_model("claude-sonnet-4").unwrap(), "gemini-2.5-flash");
         assert!(map_model("unknown-model").is_err());
@@ -96,14 +99,24 @@ mod tests {
         );
 
         // Test without date suffix
-        assert_eq!(map_model("claude-sonnet-4-5").unwrap(), "gemini-3-flash-preview");
+        assert_eq!(
+            map_model("claude-sonnet-4-5").unwrap(),
+            "gemini-3-flash-preview"
+        );
     }
 
     #[test]
     fn test_strip_date_suffix() {
-        assert_eq!(strip_date_suffix("claude-sonnet-4-5-20250929"), "claude-sonnet-4-5");
-        assert_eq!(strip_date_suffix("claude-opus-4-5-20251101"), "claude-opus-4-5");
-        assert_eq!(strip_date_suffix("claude-sonnet-4-5"), "claude-sonnet-4-5"); // No date suffix
+        assert_eq!(
+            strip_date_suffix("claude-sonnet-4-5-20250929"),
+            "claude-sonnet-4-5"
+        );
+        assert_eq!(
+            strip_date_suffix("claude-opus-4-5-20251101"),
+            "claude-opus-4-5"
+        );
+        assert_eq!(strip_date_suffix("claude-sonnet-4-5"), "claude-sonnet-4-5");
+        // No date suffix
     }
 
     #[test]

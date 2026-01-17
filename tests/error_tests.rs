@@ -14,7 +14,7 @@ fn test_error_display_messages() {
         ProxyError::ServiceUnavailable("Service down".to_string()),
         ProxyError::Overloaded("Overloaded".to_string()),
     ];
-    
+
     for error in errors {
         let display = format!("{}", error);
         assert!(!display.is_empty(), "Error should have display message");

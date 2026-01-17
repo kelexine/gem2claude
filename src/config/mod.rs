@@ -32,19 +32,11 @@ impl AppConfig {
         let config = Config::builder()
             // Step 1: Initialize with default values from the struct's Default implementation
             .add_source(Config::try_from(&Self::default())?)
-            
             // Step 2: Merge settings from the optional config file
-            .add_source(
-                File::with_name(&Self::default_config_path())
-                    .required(false)
-            )
-            
+            .add_source(File::with_name(&Self::default_config_path()).required(false))
             // Step 3: Override with environment variables
             // Matches variables like GEMINI_PROXY_SERVER_HOST -> server.host
-            .add_source(
-                Environment::with_prefix("GEMINI_PROXY")
-                    .separator("_")
-            )
+            .add_source(Environment::with_prefix("GEMINI_PROXY").separator("_"))
             .build()
             .map_err(|e| ProxyError::Config(e.to_string()))?;
 

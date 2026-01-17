@@ -14,15 +14,15 @@ use serde_json::Value;
 pub struct InternalApiRequest {
     /// Target Gemini model name (e.g., "gemini-pro").
     pub model: String,
-    
+
     /// Google Cloud project ID (resolved from credentials).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
-    
+
     /// User prompt identifier (for internal tracking).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_prompt_id: Option<String>,
-    
+
     /// The actual content generation request.
     pub request: GenerateContentRequest,
 }
@@ -33,23 +33,23 @@ pub struct InternalApiRequest {
 pub struct GenerateContentRequest {
     /// Conversation history.
     pub contents: Vec<Content>,
-    
+
     /// System instructions (context).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_instruction: Option<SystemInstruction>,
-    
+
     /// Generation parameters (temperature, max tokens, etc.).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub generation_config: Option<GenerationConfig>,
-    
+
     /// Tool definitions.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<ToolDeclaration>>,
-    
+
     /// Tool usage configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_config: Option<ToolConfig>,
-    
+
     /// Reference to cached content.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cached_content: Option<String>,
@@ -76,42 +76,42 @@ pub enum Part {
     Text {
         /// The text string.
         text: String,
-        
+
         /// Flag indicating this is thinking content (Gemini 2.5/3.x).
         #[serde(skip_serializing_if = "Option::is_none")]
         thought: Option<bool>,
-        
+
         /// Metadata hash for API validation.
         #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
         thought_signature: Option<String>,
     },
-    
+
     /// Extended thinking/reasoning from Gemini.
     Thought {
         /// Actual thinking text - translate to Claude's thinking blocks.
         thought: String,
-        
+
         /// Metadata hash for API validation (optional).
         #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
         thought_signature: Option<String>,
     },
-    
+
     /// Inline data (images, etc).
     InlineData {
         #[serde(rename = "inlineData")]
         inline_data: InlineData,
     },
-    
+
     /// Model requesting to call a function.
     FunctionCall {
         #[serde(rename = "functionCall")]
         function_call: FunctionCall,
-        
+
         /// Required by Gemini 3 models for function calls in conversation history.
         #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
         thought_signature: Option<String>,
     },
-    
+
     /// Result of a function call.
     FunctionResponse {
         #[serde(rename = "functionResponse")]
@@ -186,11 +186,11 @@ pub struct ThinkingConfig {
     /// Whether to include thinking in the output.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_thoughts: Option<bool>,
-    
+
     /// Token budget for thinking (Gemini 2.5).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_budget: Option<u32>,
-    
+
     /// Thinking level for Gemini 3.x: "LOW", "MEDIUM", "HIGH".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<String>,
@@ -263,16 +263,16 @@ pub struct UsageMetadata {
     /// Tokens in the input prompt.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_token_count: Option<u32>,
-    
+
     /// Tokens in the generated response.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub candidates_token_count: Option<u32>,
-    
+
     /// Total tokens (prompt + candidates).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_token_count: Option<u32>,
-    
+
     /// Number of tokens read from the cache.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cached_content_token_count: Option<u32>, 
+    pub cached_content_token_count: Option<u32>,
 }

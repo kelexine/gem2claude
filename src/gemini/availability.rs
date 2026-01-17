@@ -65,17 +65,20 @@ impl ModelAvailabilityService {
     /// Mark a model for retry in the current turn (transient error)
     pub fn mark_retry_once(&self, model: &str, reason: String) {
         let mut health = self.health.write().unwrap();
-        
+
         // Don't downgrade terminal errors
         if let Some(AvailabilityStatus::Terminal { .. }) = health.get(model) {
             return;
         }
 
         debug!("Marking model {} as STICKY_RETRY: {}", model, reason);
-        health.insert(model.to_string(), AvailabilityStatus::StickyRetry { 
-            reason, 
-            consumed: false 
-        });
+        health.insert(
+            model.to_string(),
+            AvailabilityStatus::StickyRetry {
+                reason,
+                consumed: false,
+            },
+        );
         self.record_metrics(model, "sticky_retry");
     }
 
@@ -84,17 +87,17 @@ impl ModelAvailabilityService {
         let health = self.health.read().unwrap();
         match health.get(model) {
             Some(AvailabilityStatus::Terminal { .. }) => false,
-            // Sticky retry logic (if consumed) would go here, 
+            // Sticky retry logic (if consumed) would go here,
             // but for now we just report health status.
-            _ => true, 
+            _ => true,
         }
     }
 
     fn record_metrics(&self, model: &str, status: &str) {
         crate::metrics::record_model_health(
-            model, 
-            status, 
-            &["healthy", "sticky_retry", "terminal"]
+            model,
+            status,
+            &["healthy", "sticky_retry", "terminal"],
         );
     }
 }

@@ -8,10 +8,7 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum ImageSource {
     #[serde(rename = "base64")]
-    Base64 { 
-        media_type: String,
-        data: String,
-    },
+    Base64 { media_type: String, data: String },
     // Future: URL support
     // Url { url: String },
 }

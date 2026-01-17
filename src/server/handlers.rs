@@ -7,7 +7,11 @@
 //! Author: kelexine (<https://github.com/kelexine>)
 
 use super::routes::AppState;
-use axum::{extract::State, response::{IntoResponse, Response}, Json};
+use axum::{
+    extract::State,
+    response::{IntoResponse, Response},
+    Json,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -133,8 +137,11 @@ pub async fn health_handler(State(state): State<AppState>) -> Json<HealthRespons
 pub async fn metrics_handler() -> impl IntoResponse {
     let metrics = crate::metrics::gather_metrics();
     (
-        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
-        metrics
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4",
+        )],
+        metrics,
     )
 }
 
@@ -152,8 +159,11 @@ pub async fn messages_handler(
 ) -> Result<Response, crate::error::ProxyError> {
     use tracing::debug;
 
-    debug!("Received Anthropic request: model={}, stream={:?}", req.model, req.stream);
-    
+    debug!(
+        "Received Anthropic request: model={}, stream={:?}",
+        req.model, req.stream
+    );
+
     // Comprehensive request logging for debugging/audit trails
     debug!("â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”");
     debug!("ðŸ“‹ REQUEST HEADERS:");
@@ -163,11 +173,12 @@ pub async fn messages_handler(
         }
     }
     debug!("â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”");
-    
+
     let body_json = serde_json::to_string_pretty(&req).unwrap_or_else(|_| "{}".to_string());
     let body_preview = if body_json.len() > 1000 {
         // Find safe UTF-8 boundary before 1000th byte
-        let truncate_at = body_json.char_indices()
+        let truncate_at = body_json
+            .char_indices()
             .take_while(|(idx, _)| *idx < 1000)
             .last()
             .map(|(idx, ch)| idx + ch.len_utf8())
@@ -206,14 +217,16 @@ async fn non_stream_messages_handler(
 
     // Model and request translation
     let gemini_model = crate::models::mapping::map_model(&req.model)?;
-    
+
     // Check cache first (returns both cache name and cached translation if available)
     let (cached_content, cached_translation) = if let Some(cache_mgr) = &state.cache_manager {
-        cache_mgr.get_or_create_cache(&req, state.gemini_client.project_id(), &state.gemini_client).await?
+        cache_mgr
+            .get_or_create_cache(&req, state.gemini_client.project_id(), &state.gemini_client)
+            .await?
     } else {
         (None, None)
     };
-    
+
     // Use cached translation if available, otherwise translate now
     let mut gemini_req = if let Some(cached_req) = cached_translation {
         debug!("Using cached translation (cache hit)");
@@ -221,29 +234,34 @@ async fn non_stream_messages_handler(
     } else {
         debug!("Translating request (cache miss or disabled)");
         translate_request(
-            req.clone(), 
-            state.gemini_client.project_id(), 
-            None,  // Cache manager already called above
-            None   // Gemini client not needed for translation
-        ).await?
+            req.clone(),
+            state.gemini_client.project_id(),
+            None, // Cache manager already called above
+            None, // Gemini client not needed for translation
+        )
+        .await?
     };
-    
+
     // Apply cached content reference if present
     if let Some(cache_name) = cached_content {
         gemini_req.cached_content = Some(cache_name);
     }
-    
+
     debug!("Executing unary Gemini request");
 
     // Upstream API call
-    let gemini_resp = match state.gemini_client.generate_content(gemini_req, &gemini_model).await {
+    let gemini_resp = match state
+        .gemini_client
+        .generate_content(gemini_req, &gemini_model)
+        .await
+    {
         Ok(resp) => resp,
         Err(e) => {
             error!("Gemini API call failed: {}", e);
             return Err(e);
         }
     };
-    
+
     // Response translation back to Anthropic format
     let anthropic_resp = match translate_response(gemini_resp, &req.model) {
         Ok(resp) => resp,
@@ -270,7 +288,7 @@ async fn non_stream_messages_handler(
     } else {
         crate::metrics::record_cache_miss();
     }
-    
+
     if anthropic_resp.usage.cache_creation_input_tokens > 0 {
         crate::metrics::record_cache_create();
     }
@@ -289,9 +307,9 @@ async fn stream_messages_handler(
     state: AppState,
     req: crate::models::anthropic::MessagesRequest,
 ) -> Result<Response, crate::error::ProxyError> {
-    use futures::StreamExt;
     use crate::translation::streaming::StreamTranslator;
     use crate::translation::translate_request;
+    use futures::StreamExt;
     use tracing::{debug, warn};
 
     let request_start = std::time::Instant::now();
@@ -301,14 +319,16 @@ async fn stream_messages_handler(
 
     // 1. Initial translation and stream setup
     let gemini_model = crate::models::mapping::map_model(&req.model)?;
-    
+
     // Check cache first (returns both cache name and cached translation if available)
     let (cached_content, cached_translation) = if let Some(cache_mgr) = &state.cache_manager {
-        cache_mgr.get_or_create_cache(&req, state.gemini_client.project_id(), &state.gemini_client).await?
+        cache_mgr
+            .get_or_create_cache(&req, state.gemini_client.project_id(), &state.gemini_client)
+            .await?
     } else {
         (None, None)
     };
-    
+
     // Use cached translation if available, otherwise translate now
     let mut gemini_req = if let Some(cached_req) = cached_translation {
         debug!("Using cached translation (cache hit)");
@@ -316,19 +336,21 @@ async fn stream_messages_handler(
     } else {
         debug!("Translating request (cache miss or disabled)");
         translate_request(
-            req.clone(), 
-            state.gemini_client.project_id(), 
-            None,  // Cache manager already called above
-            None   // Gemini client not needed for translation
-        ).await?
+            req.clone(),
+            state.gemini_client.project_id(),
+            None, // Cache manager already called above
+            None, // Gemini client not needed for translation
+        )
+        .await?
     };
-    
+
     // Apply cached content reference if present
     if let Some(cache_name) = cached_content {
         gemini_req.cached_content = Some(cache_name);
     }
 
-    let gemini_stream = state.gemini_client
+    let gemini_stream = state
+        .gemini_client
         .stream_generate_content(gemini_req, &gemini_model)
         .await?;
 
@@ -338,7 +360,7 @@ async fn stream_messages_handler(
     let sse_stream = async_stream::stream! {
         debug!("SSE Stream established");
         futures::pin_mut!(gemini_stream);
-        
+
         let mut chunk_count = 0;
         loop {
             tokio::select! {
@@ -395,10 +417,10 @@ async fn stream_messages_handler(
                 }
             }
         }
-        
+
         let duration = request_start.elapsed().as_secs_f64();
         debug!("SSE Stream finished. Total chunks: {}", chunk_count);
-        
+
         // Record streaming metrics
         crate::metrics::record_request("POST", "/v1/messages", 200, &translator.model, duration);
         crate::metrics::record_tokens(
@@ -418,12 +440,12 @@ async fn stream_messages_handler(
         if translator.cached_creation_input_tokens > 0 {
             crate::metrics::record_cache_create();
         }
-    }; 
+    };
 
     // 3. Construct the finalized HTTP/SSE response
     use axum::body::Body;
     let body = Body::from_stream(sse_stream);
-    
+
     Ok(Response::builder()
         .status(200)
         .header("Content-Type", "text/event-stream; charset=utf-8")
@@ -434,7 +456,10 @@ async fn stream_messages_handler(
         .header("anthropic-version", "2023-06-01") // Mock headers for compatibility
         .header("anthropic-ratelimit-requests-limit", "50")
         .header("anthropic-ratelimit-requests-remaining", "49")
-        .header("anthropic-ratelimit-requests-reset", chrono::Utc::now().to_rfc3339())
+        .header(
+            "anthropic-ratelimit-requests-reset",
+            chrono::Utc::now().to_rfc3339(),
+        )
         .header("request-id", format!("req_{}", uuid::Uuid::new_v4()))
         .body(body)
         .unwrap())
@@ -445,25 +470,19 @@ async fn stream_messages_handler(
 /// Claude Code sometimes sends "batch" event logs. This handler captures them,
 /// appends them to a local log file for auditing, and returns a 200 OK to
 /// ensure compatibility with the client's expectations.
-pub async fn event_logging_handler(
-    body: String,
-) -> impl IntoResponse {
+pub async fn event_logging_handler(body: String) -> impl IntoResponse {
     use std::fs::OpenOptions;
     use std::io::Write;
-    
+
     // Log telemetry events to the home directory for transparency
     if let Some(home) = std::env::var_os("HOME") {
         let log_path = std::path::Path::new(&home).join("claude_code_events.log");
-        
-        if let Ok(mut file) = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_path)
-        {
+
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
             let timestamp = chrono::Utc::now().to_rfc3339();
             let _ = writeln!(file, "[{}] {}", timestamp, body);
         }
     }
-    
+
     axum::http::StatusCode::OK
 }

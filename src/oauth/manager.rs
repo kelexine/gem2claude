@@ -9,17 +9,18 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 
 /// Google OAuth2 credentials for Gemini CLI (public, for installed apps)
 /// Source: gemini-cli-0.23.0/packages/core/src/code_assist/oauth2.ts
-pub const OAUTH_CLIENT_ID: &str = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
+pub const OAUTH_CLIENT_ID: &str =
+    "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
 pub const OAUTH_CLIENT_SECRET: &str = "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";
 
 #[derive(Clone)]
 pub struct OAuthManager {
     credentials: Arc<RwLock<OAuthCredentials>>,
-    refresh_lock: Arc<Mutex<()>>,  // Prevents thundering herd on refresh
+    refresh_lock: Arc<Mutex<()>>, // Prevents thundering herd on refresh
     config: OAuthConfig,
 }
 
@@ -27,7 +28,7 @@ impl OAuthManager {
     /// Create a new OAuth manager and load credentials
     pub async fn new(config: &OAuthConfig) -> Result<Self> {
         let credentials = Self::load_credentials(&config.credentials_path)?;
-        
+
         debug!("Loaded OAuth credentials");
         debug!(
             "Token expires in {} seconds",
@@ -44,7 +45,7 @@ impl OAuthManager {
     /// Load OAuth credentials from file
     fn load_credentials(path: &str) -> Result<OAuthCredentials> {
         let path = Path::new(path);
-        
+
         if !path.exists() {
             return Err(ProxyError::InvalidCredentials(format!(
                 "Credentials file not found: {}",
@@ -96,7 +97,8 @@ impl OAuthManager {
             let creds = self.credentials.read().await;
             if !creds.is_expired(self.config.refresh_buffer_seconds) {
                 // Update expiry metric
-                let seconds_remaining = (creds.expiry_date / 1000 - chrono::Utc::now().timestamp()).max(0);
+                let seconds_remaining =
+                    (creds.expiry_date / 1000 - chrono::Utc::now().timestamp()).max(0);
                 crate::metrics::update_oauth_expiry(seconds_remaining);
                 return Ok(creds.access_token.clone());
             }
@@ -174,7 +176,10 @@ impl OAuthManager {
 
             let status = response.status();
             if !status.is_success() {
-                let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                let error_text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Unknown error".to_string());
                 return Err((status.as_u16(), error_text));
             }
 
@@ -234,8 +239,9 @@ impl OAuthManager {
         let json = serde_json::to_string_pretty(creds)
             .map_err(|e| ProxyError::Internal(format!("Failed to serialize credentials: {}", e)))?;
 
-        let mut file = fs::File::create(path)
-            .map_err(|e| ProxyError::Internal(format!("Failed to create credentials file: {}", e)))?;
+        let mut file = fs::File::create(path).map_err(|e| {
+            ProxyError::Internal(format!("Failed to create credentials file: {}", e))
+        })?;
 
         file.write_all(json.as_bytes())
             .map_err(|e| ProxyError::Internal(format!("Failed to write credentials: {}", e)))?;
@@ -281,17 +287,15 @@ mod tests {
     fn test_load_valid_credentials() {
         let mut temp = NamedTempFile::new().unwrap();
         write!(temp, "{}", create_test_credentials()).unwrap();
-        
+
         #[cfg(unix)]
         {
             use std::fs::Permissions;
             fs::set_permissions(temp.path(), Permissions::from_mode(0o600)).unwrap();
         }
 
-        let creds = OAuthManager::load_credentials(
-            temp.path().to_str().unwrap()
-        ).unwrap();
-        
+        let creds = OAuthManager::load_credentials(temp.path().to_str().unwrap()).unwrap();
+
         assert_eq!(creds.token_type, "Bearer");
     }
 

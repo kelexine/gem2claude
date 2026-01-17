@@ -11,7 +11,10 @@ use crate::config::AppConfig;
 use crate::error::Result;
 use crate::gemini::GeminiClient;
 use crate::oauth::OAuthManager;
-use axum::{routing::{get, post}, Router};
+use axum::{
+    routing::{get, post},
+    Router,
+};
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
 
@@ -80,7 +83,9 @@ pub fn create_router(
         .route("/metrics", get(metrics_handler))
         .route("/v1/messages", post(messages_handler))
         .route("/api/event_logging/batch", post(event_logging_handler))
-        .layer(tower_http::limit::RequestBodyLimitLayer::new(50 * 1024 * 1024)) // 50MB limit
+        .layer(tower_http::limit::RequestBodyLimitLayer::new(
+            50 * 1024 * 1024,
+        )) // 50MB limit
         .layer(TraceLayer::new_for_http())
         .layer(propagate_request_id)
         .layer(set_request_id)

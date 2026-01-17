@@ -107,9 +107,7 @@ pub async fn stream_generate_content(
 /// # Returns
 ///
 /// A stream yielding `Result<GenerateContentResponse>` items.
-fn parse_sse_stream<S>(
-    byte_stream: S,
-) -> impl Stream<Item = Result<GenerateContentResponse>> + Send
+fn parse_sse_stream<S>(byte_stream: S) -> impl Stream<Item = Result<GenerateContentResponse>> + Send
 where
     S: Stream<Item = reqwest::Result<bytes::Bytes>> + Send + 'static,
 {
@@ -117,9 +115,9 @@ where
 
     async_stream::stream! {
         let mut buffer = String::new();
-       
+
         futures::pin_mut!(byte_stream);
-        
+
         while let Some(chunk_result) = byte_stream.next().await {
             match chunk_result {
                 Ok(chunk) => {
@@ -172,9 +170,9 @@ where
                 }
             }
         }
-        
+
         debug!("HTTP byte stream ended - no more chunks from Gemini");
-        
+
         // Handle potential final event that might not be followed by a delimiter
         if !buffer.trim().is_empty() {
             debug!("Processing remaining buffer: {} chars", buffer.len());
@@ -185,7 +183,7 @@ where
                 debug!("Failed to parse remaining buffer as SSE event");
             }
         }
-        
+
         debug!("Gemini SSE stream ended");
     }
 }
@@ -213,13 +211,13 @@ fn parse_sse_event(event_data: &str) -> Option<GenerateContentResponse> {
     }
 
     let data = data_line?;
-    
+
     // Ignore internal protocol markers like "[DONE]" which signify the end of SSE stream
     if data.is_empty() || data == "[DONE]" {
         debug!("Skipping empty or DONE marker");
         return None;
     }
-   
+
     // Deserialize the JSON payload directly into our response model
     match serde_json::from_str::<GenerateContentResponse>(data) {
         Ok(response) => {
@@ -264,9 +262,7 @@ mod tests {
         // LF, CRLF, LF
         let payload = format!("{}\n\n{}\r\n\r\n{}\n\n", event1, event2, event3);
 
-        let stream = futures::stream::iter(vec![
-            Ok(bytes::Bytes::from(payload))
-        ]);
+        let stream = futures::stream::iter(vec![Ok(bytes::Bytes::from(payload))]);
 
         let parsed_stream = parse_sse_stream(stream);
         futures::pin_mut!(parsed_stream);
@@ -277,9 +273,29 @@ mod tests {
         }
 
         assert_eq!(events.len(), 3);
-        assert_eq!(events[0].response.as_ref().unwrap().candidates[0].content.parts[0].as_text().unwrap(), "First");
-        assert_eq!(events[1].response.as_ref().unwrap().candidates[0].content.parts[0].as_text().unwrap(), "Second");
-        assert_eq!(events[2].response.as_ref().unwrap().candidates[0].content.parts[0].as_text().unwrap(), "Third");
+        assert_eq!(
+            events[0].response.as_ref().unwrap().candidates[0]
+                .content
+                .parts[0]
+                .as_text()
+                .unwrap(),
+            "First"
+        );
+        assert_eq!(
+            events[1].response.as_ref().unwrap().candidates[0]
+                .content
+                .parts[0]
+                .as_text()
+                .unwrap(),
+            "Second"
+        );
+        assert_eq!(
+            events[2].response.as_ref().unwrap().candidates[0]
+                .content
+                .parts[0]
+                .as_text()
+                .unwrap(),
+            "Third"
+        );
     }
 }
-
