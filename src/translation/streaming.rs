@@ -21,6 +21,7 @@ pub struct StreamTranslator {
     pub input_tokens: u32,
     pub output_tokens: u32,
     pub cached_input_tokens: u32,
+    pub cached_creation_input_tokens: u32,
     first_chunk: bool,
     
     // Block state tracking
@@ -41,6 +42,7 @@ impl StreamTranslator {
             input_tokens: 0,
             output_tokens: 0,
             cached_input_tokens: 0,
+            cached_creation_input_tokens: 0,
             first_chunk: true,
             
             current_block_index: 0,
@@ -174,6 +176,7 @@ impl StreamTranslator {
                     self.input_tokens = usage.prompt_token_count.unwrap_or(0);
                     self.output_tokens = usage.candidates_token_count.unwrap_or(0);
                     self.cached_input_tokens = usage.cached_content_token_count.unwrap_or(0);
+                    self.cached_creation_input_tokens = 0; 
                 }
             }
 

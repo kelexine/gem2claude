@@ -264,11 +264,15 @@ async fn non_stream_messages_handler(
         anthropic_resp.usage.cache_creation_input_tokens,
     );
 
-    // Record cache hit/miss
+    // Record cache hit/miss/create
     if anthropic_resp.usage.cache_read_input_tokens > 0 {
         crate::metrics::record_cache_hit();
     } else {
         crate::metrics::record_cache_miss();
+    }
+    
+    if anthropic_resp.usage.cache_creation_input_tokens > 0 {
+        crate::metrics::record_cache_create();
     }
 
     Ok(Json(anthropic_resp).into_response())
@@ -409,6 +413,10 @@ async fn stream_messages_handler(
             crate::metrics::record_cache_hit();
         } else {
             crate::metrics::record_cache_miss();
+        }
+
+        if translator.cached_creation_input_tokens > 0 {
+            crate::metrics::record_cache_create();
         }
     }; 
 
