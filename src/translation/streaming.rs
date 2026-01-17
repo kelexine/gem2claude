@@ -17,9 +17,10 @@ enum BlockType {
 
 pub struct StreamTranslator {
     message_id: String,
-    model: String,
-    input_tokens: u32,
-    output_tokens: u32,
+    pub model: String,
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+    pub cached_input_tokens: u32,
     first_chunk: bool,
     
     // Block state tracking
@@ -39,6 +40,7 @@ impl StreamTranslator {
             model,
             input_tokens: 0,
             output_tokens: 0,
+            cached_input_tokens: 0,
             first_chunk: true,
             
             current_block_index: 0,
@@ -171,9 +173,11 @@ impl StreamTranslator {
                 if let Some(usage) = &wrapper.usage_metadata {
                     self.input_tokens = usage.prompt_token_count.unwrap_or(0);
                     self.output_tokens = usage.candidates_token_count.unwrap_or(0);
+                    self.cached_input_tokens = usage.cached_content_token_count.unwrap_or(0);
                 }
             }
 
+            crate::metrics::record_sse_event("message_start", &self.model);
             events.push(StreamEvent::MessageStart {
                 message: MessageStart {
                     id: self.message_id.clone(),
@@ -232,6 +236,7 @@ impl StreamTranslator {
                 if let Some(finish_reason) = candidate.finish_reason {
                     // Handle MALFORMED_FUNCTION_CALL as an error
                     if finish_reason == "MALFORMED_FUNCTION_CALL" {
+                        crate::metrics::record_sse_event("error", &self.model);
                         events.push(StreamEvent::Error {
                             error: ErrorData {
                                 error_type: "invalid_request_error".to_string(),
@@ -263,6 +268,7 @@ impl StreamTranslator {
         // Close previous block if it wasn't thinking
         if let Some(current) = self.current_block_type {
             if current != BlockType::Thinking {
+                crate::metrics::record_sse_event("content_block_stop", &self.model);
                 events.push(StreamEvent::ContentBlockStop { 
                     index: self.current_block_index 
                 });
@@ -273,6 +279,7 @@ impl StreamTranslator {
 
         // Start thinking block if needed
         if self.current_block_type.is_none() {
+            crate::metrics::record_sse_event("content_block_start", &self.model);
             events.push(StreamEvent::ContentBlockStart {
                 index: self.current_block_index,
                 content_block: ContentBlockStart::Thinking,
@@ -282,6 +289,7 @@ impl StreamTranslator {
         
         // Send thinking delta
         if !content.is_empty() {
+            crate::metrics::record_sse_event("content_block_delta", &self.model);
             events.push(StreamEvent::ContentBlockDelta {
                 index: self.current_block_index,
                 delta: Delta::ThinkingDelta { 
@@ -292,6 +300,7 @@ impl StreamTranslator {
         
         // Send signature delta if present
         if let Some(sig) = signature {
+            crate::metrics::record_sse_event("content_block_delta", &self.model);
             events.push(StreamEvent::ContentBlockDelta {
                 index: self.current_block_index,
                 delta: Delta::SignatureDelta { signature: sig },
@@ -308,6 +317,7 @@ impl StreamTranslator {
             if let Some(current) = self.current_block_type {
                 if current != block_type {
                     // Close previous block
+                    crate::metrics::record_sse_event("content_block_stop", &self.model);
                     events.push(StreamEvent::ContentBlockStop { 
                         index: self.current_block_index 
                     });
@@ -324,6 +334,7 @@ impl StreamTranslator {
                     BlockType::ToolUse => unreachable!("Tool use not from text segments"),
                 };
 
+                crate::metrics::record_sse_event("content_block_start", &self.model);
                 events.push(StreamEvent::ContentBlockStart {
                     index: self.current_block_index,
                     content_block,
@@ -339,6 +350,7 @@ impl StreamTranslator {
                     BlockType::ToolUse => unreachable!(),
                 };
                 
+                crate::metrics::record_sse_event("content_block_delta", &self.model);
                 events.push(StreamEvent::ContentBlockDelta {
                     index: self.current_block_index,
                     delta,
@@ -356,6 +368,7 @@ impl StreamTranslator {
     ) {
         // Close any previous block
         if self.current_block_type.is_some() {
+            crate::metrics::record_sse_event("content_block_stop", &self.model);
             events.push(StreamEvent::ContentBlockStop { 
                 index: self.current_block_index 
             });
@@ -372,6 +385,7 @@ impl StreamTranslator {
         }
         
         // Send content_block_start
+        crate::metrics::record_sse_event("content_block_start", &self.model);
         events.push(StreamEvent::ContentBlockStart {
             index: self.current_block_index,
             content_block: ContentBlockStart::ToolUse {
@@ -386,6 +400,7 @@ impl StreamTranslator {
         
         debug!("Tool call: {} with args: {}", function_call.name, args_json);
         
+        crate::metrics::record_sse_event("content_block_delta", &self.model);
         events.push(StreamEvent::ContentBlockDelta {
             index: self.current_block_index,
             delta: Delta::InputJsonDelta {
@@ -394,6 +409,7 @@ impl StreamTranslator {
         });
 
         // Always close tool blocks immediately (they come as complete objects)
+        crate::metrics::record_sse_event("content_block_stop", &self.model);
         events.push(StreamEvent::ContentBlockStop { 
             index: self.current_block_index 
         });
@@ -436,6 +452,7 @@ impl StreamTranslator {
             }
         };
 
+        crate::metrics::record_sse_event("message_delta", &self.model);
         events.push(StreamEvent::MessageDelta {
             delta: MessageDeltaData {
                 stop_reason,
@@ -446,6 +463,7 @@ impl StreamTranslator {
             },
         });
 
+        crate::metrics::record_sse_event("message_stop", &self.model);
         events.push(StreamEvent::MessageStop);
         
         // Reset state for potential next message

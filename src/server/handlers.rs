@@ -264,6 +264,13 @@ async fn non_stream_messages_handler(
         anthropic_resp.usage.cache_creation_input_tokens,
     );
 
+    // Record cache hit/miss
+    if anthropic_resp.usage.cache_read_input_tokens > 0 {
+        crate::metrics::record_cache_hit();
+    } else {
+        crate::metrics::record_cache_miss();
+    }
+
     Ok(Json(anthropic_resp).into_response())
 }
 
@@ -282,6 +289,8 @@ async fn stream_messages_handler(
     use crate::translation::streaming::StreamTranslator;
     use crate::translation::translate_request;
     use tracing::{debug, warn};
+
+    let request_start = std::time::Instant::now();
 
     debug!("Initiating streaming flow for model: {}", req.model);
     crate::metrics::record_sse_connection("opened");
@@ -382,7 +391,25 @@ async fn stream_messages_handler(
                 }
             }
         }
+        
+        let duration = request_start.elapsed().as_secs_f64();
         debug!("SSE Stream finished. Total chunks: {}", chunk_count);
+        
+        // Record streaming metrics
+        crate::metrics::record_request("POST", "/v1/messages", 200, &translator.model, duration);
+        crate::metrics::record_tokens(
+            &translator.model,
+            translator.input_tokens,
+            translator.output_tokens,
+            translator.cached_input_tokens,
+            0, // cache_creation not tracked in streaming yet
+        );
+
+        if translator.cached_input_tokens > 0 {
+            crate::metrics::record_cache_hit();
+        } else {
+            crate::metrics::record_cache_miss();
+        }
     }; 
 
     // 3. Construct the finalized HTTP/SSE response

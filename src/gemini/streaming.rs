@@ -11,6 +11,7 @@ use crate::oauth::OAuthManager;
 use futures::stream::Stream;
 use reqwest::Client;
 use std::pin::Pin;
+use std::time::Instant;
 use tracing::{debug, warn};
 
 /// Initiates a streaming content generation request to the Gemini API.
@@ -24,6 +25,7 @@ use tracing::{debug, warn};
 /// * `url` - The Gemini API endpoint URL.
 /// * `request_body` - The JSON-encoded request body.
 /// * `oauth_manager` - Manager for handling OAuth2 tokens and authentication.
+/// * `model` - The model name for metrics.
 ///
 /// # Returns
 ///
@@ -40,6 +42,7 @@ pub async fn stream_generate_content(
     url: String,
     request_body: String,
     oauth_manager: &OAuthManager,
+    model: &str,
 ) -> Result<Pin<Box<dyn Stream<Item = Result<GenerateContentResponse>> + Send>>> {
     debug!("Starting Gemini SSE stream to: {}", url);
 
@@ -48,9 +51,12 @@ pub async fn stream_generate_content(
     let url_clone = url.clone();
     let request_body_clone = request_body.clone();
     let oauth_manager = oauth_manager.clone();
+    let model = model.to_string(); // Metric label needs to be owned or static, usually we pass &str.
+                                   // But here we just record before returning.
 
-    // Per Claude API docs (our target bridge format): streaming errors should be returned 
+    // Per Claude API docs (our target bridge format): streaming errors should be returned
     // immediately during the initial handshake, not silently retried within the stream.
+    let start_time = Instant::now();
     let access_token = oauth_manager.get_token().await?;
 
     let response = client
@@ -63,7 +69,12 @@ pub async fn stream_generate_content(
         .await
         .map_err(|e| ProxyError::GeminiApi(format!("HTTP error: {}", e)))?;
 
+    let duration = start_time.elapsed().as_secs_f64();
     let status = response.status();
+
+    // Record API setup metric (TTFB/Connection)
+    crate::metrics::record_gemini_call(&model, status.as_u16(), true, duration);
+
     if !status.is_success() {
         let error_text = response.text().await.unwrap_or_default();
         // Map common API error statuses to specific ProxyError variants to match Claude API expectations

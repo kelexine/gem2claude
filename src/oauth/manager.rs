@@ -9,7 +9,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
-use tracing::{debug, info, warn};
+use tracing::{debug, info, warn, error};
 
 /// Google OAuth2 credentials for Gemini CLI (public, for installed apps)
 /// Source: gemini-cli-0.23.0/packages/core/src/code_assist/oauth2.ts
@@ -95,6 +95,9 @@ impl OAuthManager {
         {
             let creds = self.credentials.read().await;
             if !creds.is_expired(self.config.refresh_buffer_seconds) {
+                // Update expiry metric
+                let seconds_remaining = (creds.expiry_date / 1000 - chrono::Utc::now().timestamp()).max(0);
+                crate::metrics::update_oauth_expiry(seconds_remaining);
                 return Ok(creds.access_token.clone());
             }
         } // Release read lock
@@ -120,19 +123,28 @@ impl OAuthManager {
 
         // Still expired - we must refresh
         warn!("Refreshing expired OAuth token");
-        let new_creds = self.refresh_token().await?;
+        match self.refresh_token().await {
+            Ok(new_creds) => {
+                // Write new credentials with write lock
+                {
+                    let mut creds = self.credentials.write().await;
+                    *creds = new_creds.clone();
+                }
 
-        // Write new credentials with write lock
-        {
-            let mut creds = self.credentials.write().await;
-            *creds = new_creds.clone();
+                // Persist to disk for future runs
+                if let Err(e) = self.save_credentials(&new_creds) {
+                    error!("Failed to save refreshed credentials: {}", e);
+                }
+
+                info!("Successfully refreshed and saved OAuth token");
+                crate::metrics::record_oauth_refresh(true);
+                Ok(new_creds.access_token.clone())
+            }
+            Err(e) => {
+                crate::metrics::record_oauth_refresh(false);
+                Err(e)
+            }
         }
-
-        // Persist to disk for future runs
-        self.save_credentials(&new_creds)?;
-
-        info!("Successfully refreshed and saved OAuth token");
-        Ok(new_creds.access_token.clone())
     }
 
     /// Refresh the OAuth token using refresh_token

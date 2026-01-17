@@ -198,6 +198,7 @@ impl GeminiClient {
         };
 
         // Per Claude API docs: return errors immediately, let Claude Code handle retries
+        let start_time = std::time::Instant::now();
         let access_token = self.oauth_manager.get_token().await?;
 
         let response = self.http_client
@@ -209,7 +210,12 @@ impl GeminiClient {
             .await
             .map_err(|e| ProxyError::GeminiApi(format!("HTTP error: {}", e)))?;
 
+        let duration = start_time.elapsed().as_secs_f64();
         let status = response.status();
+        
+        // Record API call metric
+        crate::metrics::record_gemini_call(model, status.as_u16(), false, duration);
+
         if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
             error!(
@@ -271,6 +277,7 @@ impl GeminiClient {
             url,
             request_body,
             &self.oauth_manager,
+            model,
         )
         .await
     }
