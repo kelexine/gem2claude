@@ -1,4 +1,12 @@
-// Gemini API client with project resolution
+//! Gemini API client for Google's Generative AI models.
+//!
+//! This module provides the core `GeminiClient` which serves as the primary
+//! gateway to Google's Generative AI infrastructure. It handles:
+//! - Automated GCP project resolution via `loadCodeAssist`
+//! - Advanced HTTP connection management for low-latency streaming
+//! - Comprehensive error mapping and retry handling
+//! - Integration with the internal model availability service
+
 // Author: kelexine (https://github.com/kelexine)
 
 use super::{ProjectResolutionRequest, ProjectResolutionResponse};
@@ -11,17 +19,20 @@ use tracing::{debug, error, info};
 
 /// Client for the Google Gemini API.
 ///
-/// Handles authentication, request signing, and sending requests to the Gemini API.
-/// Includes support for:
-/// - Content generation (streaming and blocking)
-/// - Context caching
-/// - Project ID resolution
+/// The `GeminiClient` encapsulates all logic required to communicate with Google's
+/// internal API endpoints. It manages an optimized connection pool and high-level
+/// authentication flows.
 pub struct GeminiClient {
+    /// Optimized reqwest client with pooling and keep-alives.
     http_client: Client,
+    /// Configuration settings for the Gemini API.
     #[allow(dead_code)]
     config: GeminiConfig,
+    /// Manager for Google OAuth2 credentials and token refreshes.
     oauth_manager: OAuthManager,
+    /// The resolved Google Cloud Project ID.
     project_id: String,
+    /// Service tracking model health to avoid routing to failed models.
     availability_service: super::ModelAvailabilityService,
 }
 
@@ -32,8 +43,18 @@ impl GeminiClient {
     /// 1. Configure an optimized HTTP client with connection pooling
     /// 2. Authenticate using the OAuth manager
     /// 3. Call the `loadCodeAssist` endpoint to resolve the GCP project ID
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Gemini-specific configuration (timeouts, retry count)
+    /// * `oauth_manager` - Initialized OAuth manager for token acquisition
+    ///
+    /// # Errors
+    ///
+    /// Returns `ProxyError::ProjectResolution` if the project ID cannot be determined.
     pub async fn new(config: &GeminiConfig, oauth_manager: OAuthManager) -> Result<Self> {
         // Configure HTTP client for optimal streaming performance
+        // We use a custom pool and keep-alive to minimize handshake overhead
         let http_client = Client::builder()
             .timeout(Duration::from_secs(config.timeout_seconds))
             .connect_timeout(Duration::from_secs(10))
@@ -47,11 +68,11 @@ impl GeminiClient {
 
         debug!("Created HTTP client with connection pooling and keep-alive");
 
-        // Resolve project ID via loadCodeAssist
+        // Resolve project ID via loadCodeAssist (required for subsequent API calls)
         let project_id =
             Self::resolve_project_id(&http_client, &config.api_base_url, &oauth_manager).await?;
 
-        info!("Successfully resolved project ID");
+        info!("Successfully resolved project ID: {}", project_id);
 
         let availability_service = super::ModelAvailabilityService::new();
 
@@ -65,6 +86,9 @@ impl GeminiClient {
     }
 
     /// Resolve Cloud AI Companion project ID via loadCodeAssist
+    ///
+    /// This is a critical bootstrap step. Google's internal APIs often require
+    /// an explicit project ID in the payload, even when using user-level credentials.
     async fn resolve_project_id(
         client: &Client,
         base_url: &str,
@@ -99,7 +123,6 @@ impl GeminiClient {
                 let status = response.status();
                 let response_text = response.text().await.unwrap_or_default();
                 if !status.is_success() {
-                    // Try to extract error message from JSON response
                     let error_msg = Self::extract_error_message(&response_text)
                         .unwrap_or_else(|| response_text.clone());
                     return Err((status.as_u16(), error_msg));
@@ -111,12 +134,11 @@ impl GeminiClient {
                 match project_response.cloudaicompanion_project {
                     Some(project_id) => Ok(project_id),
                     None => {
-                        // Check for error in response or provide helpful message
                         let error_msg = Self::extract_error_message(&response_text)
                             .unwrap_or_else(|| {
-                                "This Google account doesn't have a Gemini Pro subscription.\n\
-                                 Please login with a Google One AI Premium or Gemini Advanced account,\n\
-                                 or set GOOGLE_CLOUD_PROJECT environment variable for Workspace accounts.".to_string()
+                                "Account check failed: No Gemini Pro subscription detected.\n\
+                                 Please ensure you are using an account with 'Google One AI Premium' or 'Gemini Advanced'."
+                                 .to_string()
                             });
                         Err((403, error_msg))
                     }
@@ -133,7 +155,7 @@ impl GeminiClient {
         })
     }
 
-    /// Extract error message from API response JSON
+    /// Extracts a user-friendly error message from a Google API JSON response.
     fn extract_error_message(response_text: &str) -> Option<String> {
         #[derive(serde::Deserialize)]
         struct ErrorResponse {
@@ -154,36 +176,41 @@ impl GeminiClient {
         None
     }
 
-    /// Get the resolved project ID
+    /// Returns the resolved Google Cloud Project ID.
     pub fn project_id(&self) -> &str {
         &self.project_id
     }
 
-    /// Get the HTTP client
+    /// Returns the internal HTTP client. Useful for low-level stream testing.
     pub fn client(&self) -> &Client {
         &self.http_client
     }
 
-    /// Get the OAuth manager
+    /// Returns the active OAuth manager.
     pub fn oauth_manager(&self) -> &OAuthManager {
         &self.oauth_manager
     }
 
-    /// Get the API base_url
+    /// Returns the configured API base URL.
     pub fn base_url(&self) -> &str {
         &self.config.api_base_url
     }
 
-    /// Call Gemini `generateContent` API (blocking).
+    /// Executes a unary (blocking) content generation request.
     ///
-    /// Returns errors immediately for client-side retry, as per Claude API behavior.
+    /// This method maps errors directly to `ProxyError` variants to allow the client
+    /// to handle retries idiomatic to the Claude API.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - Gemini-formatted generation request
+    /// * `model` - The specific Gemini model identifier
     pub async fn generate_content(
         &self,
         request: crate::models::gemini::GenerateContentRequest,
         model: &str,
     ) -> Result<crate::models::gemini::GenerateContentResponse> {
         // Track availability state (metrics only)
-        // Note: We don't block based on this status intentionally to allow client retries
         let is_available = self.availability_service.is_available(model);
         if !is_available {
             debug!(
@@ -203,7 +230,6 @@ impl GeminiClient {
             request,
         };
 
-        // Per Claude API docs: return errors immediately, let Claude Code handle retries
         let start_time = std::time::Instant::now();
         let access_token = self.oauth_manager.get_token().await?;
 
@@ -220,7 +246,6 @@ impl GeminiClient {
         let duration = start_time.elapsed().as_secs_f64();
         let status = response.status();
 
-        // Record API call metric
         crate::metrics::record_gemini_call(model, status.as_u16(), false, duration);
 
         if !status.is_success() {
@@ -230,7 +255,7 @@ impl GeminiClient {
                 status, error_text
             );
 
-            // Record failure in availability service
+            // Update health scoring for subsequent requests
             if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
                 let reason = if error_text.contains("Daily") {
                     "daily_quota"
@@ -249,8 +274,6 @@ impl GeminiClient {
                 crate::metrics::record_retry_attempt(model, "server_error");
             }
 
-            // Return error immediately with proper Claude error type
-            // This aligns with user request to respect client-side retry logic
             return Err(match status.as_u16() {
                 429 => ProxyError::TooManyRequests(format!(
                     "Gemini API quota exceeded: {}",
@@ -264,7 +287,6 @@ impl GeminiClient {
             });
         }
 
-        // On success, ensure model is marked healthy
         self.availability_service.mark_healthy(model);
 
         let response_text = response
@@ -272,25 +294,18 @@ impl GeminiClient {
             .await
             .map_err(|e| ProxyError::GeminiApi(format!("Failed to read response body: {}", e)))?;
 
-        debug!(
-            "Raw Gemini response (first 500 chars): {}",
-            response_text.chars().take(500).collect::<String>()
-        );
-
         let gemini_response: crate::models::gemini::GenerateContentResponse =
             serde_json::from_str(&response_text).map_err(|e| {
                 error!("Failed to parse Gemini response: {}", e);
-                error!("Response body: {}", response_text);
                 ProxyError::GeminiApi(format!("Response parsing error: {}", e))
             })?;
 
-        debug!("Successfully received Gemini response");
         Ok(gemini_response)
     }
 
-    /// Call Gemini `streamGenerateContent` API for SSE streaming.
+    /// Executes a streaming content generation request using Server-Sent Events (SSE).
     ///
-    /// Returns a stream of response chunks.
+    /// The stream is parsed and converted into `GenerateContentResponse` chunks.
     pub async fn stream_generate_content(
         &self,
         request: crate::models::gemini::GenerateContentRequest,
@@ -298,7 +313,6 @@ impl GeminiClient {
     ) -> Result<
         impl futures::Stream<Item = Result<crate::models::gemini::GenerateContentResponse>> + Send,
     > {
-        // Track availability (metrics only)
         let is_available = self.availability_service.is_available(model);
         if !is_available {
             debug!(
@@ -308,10 +322,8 @@ impl GeminiClient {
         }
 
         let url = format!("{}:streamGenerateContent?alt=sse", self.config.api_base_url);
-
         debug!("Calling streamGenerateContent API for model: {}", model);
 
-        // Wrap request in internal API structure
         let wrapped_request = crate::models::gemini::InternalApiRequest {
             model: model.to_string(),
             project: Some(self.project_id.clone()),
@@ -332,10 +344,10 @@ impl GeminiClient {
         .await
     }
 
-    /// Create a cached content entry via Gemini API.
+    /// Creates a persistent cached content entry in the Gemini API.
     ///
-    /// Returns the cache resource name (e.g., `cachedContents/abc123`).
-    /// The cache TTL is currently set to 5 minutes.
+    /// Context caching is used to handle large system instructions or repeated prefixes,
+    /// significantly reducing latency and cost for subsequent calls.
     pub async fn create_cache(
         &self,
         model: &str,
@@ -349,18 +361,15 @@ impl GeminiClient {
             self.config.api_base_url.trim_end_matches("/v1internal")
         );
 
-        debug!("Creating cache for model: {}", model);
-
         let request = CreateCachedContentRequest {
             model: model.to_string(),
             system_instruction,
             contents,
-            ttl: Some("300s".to_string()), // 5 minutes
+            ttl: Some("300s".to_string()), // Default 5 minute TTL
         };
 
         debug!("Creating cache for model: {}", model);
 
-        // Clone for retry closure
         let http_client = self.http_client.clone();
         let url = url.clone();
         let request = request.clone();
@@ -406,18 +415,15 @@ impl GeminiClient {
             res.name
         })
     }
-    /// Check connectivity to Gemini API.
+
+    /// Verifies the basic connectivity and authentication status of the Gemini API.
     ///
-    /// Sends a minimal `generateContent` request ("hi") to verify API is reachable
-    /// and authentication is working.
+    /// Sends a minimal placeholder request to confirm that the project resolution,
+    /// OAuth token acquisition, and upstream response cycle are functional.
     pub async fn check_connectivity(&self) -> Result<Duration> {
         let url = format!("{}:generateContent", self.config.api_base_url);
-
-        debug!("Checking connectivity via {}", url);
-
         let start = std::time::Instant::now();
 
-        // Minimal request: just "hi" to test connectivity
         let request = crate::models::gemini::GenerateContentRequest {
             contents: vec![crate::models::gemini::Content {
                 role: "user".to_string(),
@@ -442,9 +448,8 @@ impl GeminiClient {
             cached_content: None,
         };
 
-        // Wrap in internal API structure (same as generate_content)
         let wrapped_request = crate::models::gemini::InternalApiRequest {
-            model: "gemini-2.5-flash-lite".to_string(),
+            model: "gemini-2.0-flash-exp".to_string(),
             project: Some(self.project_id.clone()),
             user_prompt_id: Some(format!("health_{}", uuid::Uuid::new_v4().simple())),
             request,
@@ -458,7 +463,7 @@ impl GeminiClient {
             .header("Authorization", format!("Bearer {}", access_token))
             .header("Content-Type", "application/json")
             .json(&wrapped_request)
-            .timeout(Duration::from_secs(5)) // Short timeout for health checks
+            .timeout(Duration::from_secs(5))
             .send()
             .await
             .map_err(|e| ProxyError::GeminiApi(format!("Health check request failed: {}", e)))?;
@@ -478,6 +483,8 @@ impl GeminiClient {
         Ok(latency)
     }
 }
+
+#[cfg(test)]
 mod tests {
     #[test]
     fn test_project_resolution_request_format() {
@@ -486,7 +493,6 @@ mod tests {
         let request = ProjectResolutionRequest::default();
         let json = serde_json::to_value(&request).unwrap();
 
-        // Check metadata fields match ClientMetadata structure
         assert_eq!(json["metadata"]["ideType"], "GEMINI_CLI");
         assert_eq!(json["metadata"]["platform"], "PLATFORM_UNSPECIFIED");
         assert_eq!(json["metadata"]["pluginType"], "GEMINI");

@@ -1,4 +1,12 @@
-// Prometheus metrics registry and collectors
+//! Prometheus metrics registry and collectors for application observability.
+//!
+//! This module defines the global metrics registry and the static declarations
+//! for all application-level metrics, spanning request tracking, upstream API
+//! performance, cache utilization, and system health.
+//!
+//! All metrics are registered with the global `REGISTRY` and can be gathered
+//! via the `gather_metrics()` function for the `/metrics` endpoint.
+
 // Author: kelexine (https://github.com/kelexine)
 
 use lazy_static::lazy_static;
@@ -9,42 +17,50 @@ use prometheus::{
 };
 
 lazy_static! {
-    /// Global Prometheus registry
+    /// Global Prometheus registry for all application metrics.
     pub static ref REGISTRY: Registry = Registry::new();
 
     // ============================================================================
-    // REQUEST METRICS
+    // REQUEST METRICS (Incoming handle-level metrics)
     // ============================================================================
 
-    /// Total number of API requests
+    /// Total number of incoming API requests.
+    /// Labels:
+    /// - `method`: HTTP method (e.g., POST)
+    /// - `endpoint`: API endpoint (e.g., /v1/messages)
+    /// - `status_code`: HTTP response status
+    /// - `model`: The model requested by the client
     pub static ref REQUESTS_TOTAL: CounterVec = register_counter_vec_with_registry!(
-        Opts::new("requests_total", "Total number of API requests"),
+        Opts::new("requests_total", "Total number of API requests handled by the proxy"),
         &["method", "endpoint", "status_code", "model"],
         REGISTRY
     ).unwrap();
 
-    /// Request duration histogram
+    /// Histogram of incoming request durations.
+    /// Captures the end-to-end latency of processing a client request.
     pub static ref REQUEST_DURATION: HistogramVec = register_histogram_vec_with_registry!(
-        prometheus::HistogramOpts::new("request_duration_seconds", "Request duration in seconds")
+        prometheus::HistogramOpts::new("request_duration_seconds", "End-to-end request duration in seconds")
             .buckets(vec![0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]),
         &["method", "endpoint", "status_code"],
         REGISTRY
     ).unwrap();
 
     // ============================================================================
-    // GEMINI API METRICS
+    // GEMINI API METRICS (Upstream client-level metrics)
     // ============================================================================
 
-    /// Total Gemini API calls
+    /// Total number of calls made to the upstream Gemini API.
+    /// Useful for monitoring upstream errors and success rates.
     pub static ref GEMINI_API_CALLS: CounterVec = register_counter_vec_with_registry!(
-        Opts::new("gemini_api_calls_total", "Total Gemini API calls"),
+        Opts::new("gemini_api_calls_total", "Total upstream calls to the Gemini API"),
         &["model", "status_code", "streaming"],
         REGISTRY
     ).unwrap();
 
-    /// Gemini API call duration
+    /// Histogram of upstream Gemini API call durations.
+    /// Monitors the performance of Google's API independently of proxy overhead.
     pub static ref GEMINI_API_DURATION: HistogramVec = register_histogram_vec_with_registry!(
-        prometheus::HistogramOpts::new("gemini_api_duration_seconds", "Gemini API call duration")
+        prometheus::HistogramOpts::new("gemini_api_duration_seconds", "Upstream Gemini API call latency")
             .buckets(vec![0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0]),
         &["model", "streaming"],
         REGISTRY
@@ -54,27 +70,29 @@ lazy_static! {
     // TOKEN METRICS
     // ============================================================================
 
-    /// Total tokens processed
+    /// Cumulative count of tokens processed by the system.
+    /// Categorized by model and usage type (input, output, cached).
     pub static ref TOKENS_TOTAL: CounterVec = register_counter_vec_with_registry!(
-        Opts::new("tokens_total", "Total tokens processed"),
+        Opts::new("tokens_total", "Cumulative token throughput"),
         &["model", "type"], // type: input, output, cached_input, cached_create
         REGISTRY
     ).unwrap();
 
     // ============================================================================
-    // CACHE METRICS
+    // CACHE METRICS (Gemini Context Caching)
     // ============================================================================
 
-    /// Cache operations
+    /// Counter for Gemini Context Cache operations.
+    /// Tracks hits, misses, and creation events for upstream caching.
     pub static ref CACHE_OPERATIONS: CounterVec = register_counter_vec_with_registry!(
-        Opts::new("cache_operations_total", "Total cache operations"),
+        Opts::new("cache_operations_total", "Upstream context cache operations"),
         &["operation"], // operation: hit, miss, create
         REGISTRY
     ).unwrap();
 
-    /// Current cache entries
+    /// Gauge representing the current number of active context caches.
     pub static ref CACHE_ENTRIES: GaugeVec = register_gauge_vec_with_registry!(
-        Opts::new("cache_entries_current", "Current number of cache entries"),
+        Opts::new("cache_entries_current", "Current number of active context caches in the system"),
         &["type"], // type: active
         REGISTRY
     ).unwrap();
@@ -83,52 +101,53 @@ lazy_static! {
     // OAUTH METRICS
     // ============================================================================
 
-    /// OAuth token refresh events
+    /// Tracks success and failure of token refresh attempts.
     pub static ref OAUTH_REFRESHES: CounterVec = register_counter_vec_with_registry!(
-        Opts::new("oauth_token_refreshes_total", "Total OAuth token refreshes"),
+        Opts::new("oauth_token_refreshes_total", "Google OAuth2 token lifecycle events"),
         &["status"], // status: success, failure
         REGISTRY
     ).unwrap();
 
-    /// OAuth token expiry time
+    /// Gauge of the current access token's remaining validity time.
     pub static ref OAUTH_TOKEN_EXPIRY: GaugeVec = register_gauge_vec_with_registry!(
-        Opts::new("oauth_token_expiry_seconds", "Seconds until OAuth token expiry"),
+        Opts::new("oauth_token_expiry_seconds", "Seconds remaining until current OAuth token expires"),
         &["status"], // status: valid, expired
         REGISTRY
     ).unwrap();
 
     // ============================================================================
-    // STREAMING METRICS
+    // STREAMING METRICS (SSE)
     // ============================================================================
 
-    /// SSE events sent
+    /// Count of Server-Sent Events emitted to clients.
+    /// Useful for analyzing response verbosity and event distribution.
     pub static ref SSE_EVENTS: CounterVec = register_counter_vec_with_registry!(
-        Opts::new("sse_events_total", "Total SSE events sent"),
+        Opts::new("sse_events_total", "Total Server-Sent Events emitted to the client"),
         &["event_type", "model"],
         REGISTRY
     ).unwrap();
 
-    /// SSE connection events
+    /// Tracks streaming connection lifecycle states.
     pub static ref SSE_CONNECTIONS: CounterVec = register_counter_vec_with_registry!(
-        Opts::new("sse_connections_total", "Total SSE connections"),
+        Opts::new("sse_connections_total", "Streaming connection lifecycle events"),
         &["status"], // status: opened, closed, error
         REGISTRY
     ).unwrap();
 
     // ============================================================================
-    // TRANSLATION METRICS
+    // TRANSLATION METRICS (Internal transformation logic)
     // ============================================================================
 
-    /// Translation errors
+    /// Records failures during Anthropic-to-Gemini (and vice versa) translation.
     pub static ref TRANSLATION_ERRORS: CounterVec = register_counter_vec_with_registry!(
-        Opts::new("translation_errors_total", "Total translation errors"),
+        Opts::new("translation_errors_total", "Errors during cross-API request/response translation"),
         &["direction", "error_type"], // direction: request, response
         REGISTRY
     ).unwrap();
 
-    /// Translation cache operations (separate from Gemini context cache)
+    /// Operations on the internal LRU cache for translations.
     pub static ref TRANSLATION_CACHE_OPERATIONS: CounterVec = register_counter_vec_with_registry!(
-        Opts::new("translation_cache_operations_total", "Translation cache operations"),
+        Opts::new("translation_cache_operations_total", "Internal translation LRU cache operations"),
         &["operation"], // operation: hit, miss, eviction
         REGISTRY
     ).unwrap();
@@ -137,36 +156,41 @@ lazy_static! {
     // AVAILABILITY & RATE LIMIT METRICS
     // ============================================================================
 
-    /// Model availability status (1 = Healthy, 0 = Unhealthy/Terminal)
+    /// Current reported health of models based on recent upstream responses.
+    /// 1 = Available/Healthy, 0 = Marked for Retry or Terminal Error.
     pub static ref GEMINI_MODEL_AVAILABILITY: GaugeVec = register_gauge_vec_with_registry!(
-        Opts::new("gemini_model_availability", "Gemini model availability status (1=Available, 0=Unavailable)"),
+        Opts::new("gemini_model_availability", "Reported upstream model health status (1=Available, 0=Unavailable)"),
         &["model", "status"], // status: healthy, sticky_retry, terminal
         REGISTRY
     ).unwrap();
 
-    /// Retry attempts
+    /// Total number of automatic retries performed by the client.
     pub static ref GEMINI_RETRIES: CounterVec = register_counter_vec_with_registry!(
-        Opts::new("gemini_retries_total", "Total retry attempts due to failures"),
+        Opts::new("gemini_retries_total", "Automatic client-side retries for failed upstream calls"),
         &["model", "reason"], // reason: 429, 5xx, timeout, etc.
         REGISTRY
     ).unwrap();
 
-    /// Rate limit wait times
+    /// Wait duration spent due to 429 Rate Limit responses.
     pub static ref GEMINI_RATE_LIMIT_WAIT_SECONDS: HistogramVec = register_histogram_vec_with_registry!(
-        prometheus::HistogramOpts::new("gemini_rate_limit_wait_seconds", "Wait time for rate limiting in seconds")
+        prometheus::HistogramOpts::new("gemini_rate_limit_wait_seconds", "Total time spent waiting on rate limits")
             .buckets(vec![1.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0]),
         &["model"],
         REGISTRY
     ).unwrap();
 }
 
-/// Gather all metrics and return as Prometheus text format
+/// Gathers all registered metrics into a single Prometheus-formatted string.
+///
+/// This is intended to be served by the `/metrics` endpoint for Prometheus scraping.
 pub fn gather_metrics() -> String {
     let encoder = TextEncoder::new();
     let metric_families = REGISTRY.gather();
     let mut buffer = Vec::new();
-    encoder.encode(&metric_families, &mut buffer).unwrap();
-    String::from_utf8(buffer).unwrap()
+    encoder
+        .encode(&metric_families, &mut buffer)
+        .expect("Failed to encode metrics");
+    String::from_utf8(buffer).expect("Metrics contain invalid UTF-8")
 }
 
 #[cfg(test)]

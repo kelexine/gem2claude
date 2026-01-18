@@ -1,10 +1,16 @@
-// Cache manager - simplified for internal API automatic caching
-//
+//! Cache manager for Gemini context caching.
+//!
+//! This module implements the `CacheManager`, which is responsible for managing
+//! the lifecycle of context caches.
+//!
+//! # Note on Internal API Caching
+//! Google's internal Gemini API (v1internal), which this bridge uses, implements
+//! "automatic caching" server-side based on prompt prefixes. Unlike the public API,
+//! it does not require explicit `/cachedContents` management. The `CacheManager`
+//! in this version of `gem2claude` is primarily used to track metrics and
+//! provide a consistent interface for future extensions.
+
 // Author: kelexine (https://github.com/kelexine)
-//
-// The internal Gemini API (v1internal) handles caching automatically server-side.
-// This module exists only to maintain API compatibility but doesn't perform
-// client-side cache management.
 
 use crate::cache::models::{CacheConfig, CacheStats};
 use crate::error::Result;
@@ -14,17 +20,19 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::debug;
 
-/// Cache manager for Gemini context caching.
+/// Manages context cache entries and usage statistics.
 ///
-/// Note: The internal API handles caching automatically server-side.
-/// This manager is simplified and always returns None for cache operations.
+/// The `CacheManager` uses thread-safe primitives to track performance metrics
+/// across concurrent requests.
 pub struct CacheManager {
+    /// Configuration for cache behavior and thresholds.
     config: CacheConfig,
+    /// Thread-safe accumulator for cache performance metrics.
     stats: Arc<RwLock<CacheStats>>,
 }
 
 impl CacheManager {
-    /// Create a new cache manager.
+    /// Initializes a new `CacheManager` with the provided configuration.
     pub fn new(config: CacheConfig) -> Self {
         Self {
             config,
@@ -32,31 +40,37 @@ impl CacheManager {
         }
     }
 
-    /// Get or create cache for request.
+    /// Evaluates if a request should use a cache entry or create a new one.
     ///
-    /// Always returns (None, None) since the internal API handles caching server-side.
-    /// The API automatically caches content and reports usage via `cachedContentTokenCount`.
+    /// For the internal API, this currently returns `(None, None)` as caching
+    /// is handled transparently by the Google Cloud backend. Usage is reported
+    /// via the `cachedContentTokenCount` field in the response metadata.
+    ///
+    /// # Arguments
+    ///
+    /// * `_anthropic_req` - The original Anthropic request.
+    /// * `_project_id` - The Google Cloud Project ID.
+    /// * `_gemini_client` - Reference to the Gemini client for any needed API calls.
     pub async fn get_or_create_cache(
         &self,
         _anthropic_req: &MessagesRequest,
         _project_id: &str,
         _gemini_client: &crate::gemini::GeminiClient,
     ) -> Result<(Option<String>, Option<GenerateContentRequest>)> {
-        // Check if caching is enabled
+        // Check if caching is enabled in configuration.
         if !self.config.enabled {
-            debug!("Caching disabled: Server handles caching automatically");
+            debug!("Request-level caching is explicitly disabled in configuration.");
             return Ok((None, None));
         }
 
-        // IMPORTANT: The internal Gemini API (v1internal) handles caching automatically server-side.
-        // It does NOT support the public API's /cachedContents endpoint.
-        // Caching is automatic and reported via `cachedContentTokenCount` in usage metadata.
-        // gem2claude uses the internal API, so client-side cache creation is disabled.
-        debug!("Using internal API - cache creation not supported, server handles caching automatically");
+        // Context: gem2claude uses the internal v1internal API.
+        // This API performs automatic prefix-based caching. Manual cache injection
+        // via `cached_content` fields is not required and often unsupported.
+        debug!("Internal API detected: Relying on server-side automatic pruning/caching.");
         Ok((None, None))
     }
 
-    /// Get cache statistics
+    /// Returns a snapshot of the current cache performance statistics.
     pub async fn get_stats(&self) -> CacheStats {
         self.stats.read().await.clone()
     }

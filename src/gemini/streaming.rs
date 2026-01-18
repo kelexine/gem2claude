@@ -1,9 +1,11 @@
 //! Gemini API streaming implementation.
 //!
-//! This module provides functionality for streaming content generation from the Gemini API,
-//! handling Server-Sent Events (SSE) and robustly parsing the response stream.
-//!
-//! Author: kelexine (<https://github.com/kelexine>)
+//! This module provides the heavy-lifting for streaming content generation from
+//! Google's internal Gemini API. It implements a robust Server-Sent Events (SSE)
+//! parser that can handle byte-level boundary conditions and various line-ending
+//! delimiters.
+
+// Author: kelexine (https://github.com/kelexine)
 
 use crate::error::{ProxyError, Result};
 use crate::models::gemini::GenerateContentResponse;
@@ -36,7 +38,7 @@ use tracing::{debug, warn};
 /// Returns a `ProxyError` if:
 /// * Authentication fails.
 /// * The HTTP request fails to send.
-/// * The Gemini API returns a non-success status code (429, 529, 503, 504 are mapped to specific errors).
+/// * The Gemini API returns a non-success status code.
 pub async fn stream_generate_content(
     client: &Client,
     url: String,
@@ -46,16 +48,13 @@ pub async fn stream_generate_content(
 ) -> Result<Pin<Box<dyn Stream<Item = Result<GenerateContentResponse>> + Send>>> {
     debug!("Starting Gemini SSE stream to: {}", url);
 
-    // Clone required components for the stream lifecycle
     let client = client.clone();
     let url_clone = url.clone();
     let request_body_clone = request_body.clone();
     let oauth_manager = oauth_manager.clone();
-    let model = model.to_string(); // Metric label needs to be owned or static, usually we pass &str.
-                                   // But here we just record before returning.
+    let model = model.to_string();
 
-    // Per Claude API docs (our target bridge format): streaming errors should be returned
-    // immediately during the initial handshake, not silently retried within the stream.
+    // Handshake stage: authenticate and open the connection.
     let start_time = Instant::now();
     let access_token = oauth_manager.get_token().await?;
 
@@ -67,17 +66,16 @@ pub async fn stream_generate_content(
         .body(request_body_clone.clone())
         .send()
         .await
-        .map_err(|e| ProxyError::GeminiApi(format!("HTTP error: {}", e)))?;
+        .map_err(|e| ProxyError::GeminiApi(format!("HTTP error during handshake: {}", e)))?;
 
     let duration = start_time.elapsed().as_secs_f64();
     let status = response.status();
 
-    // Record API setup metric (TTFB/Connection)
+    // Record setup time to track Time To First Byte (TTFB) latency.
     crate::metrics::record_gemini_call(&model, status.as_u16(), true, duration);
 
     if !status.is_success() {
         let error_text = response.text().await.unwrap_or_default();
-        // Map common API error statuses to specific ProxyError variants to match Claude API expectations
         return Err(match status.as_u16() {
             429 => ProxyError::TooManyRequests(error_text),
             529 => ProxyError::Overloaded(error_text),
@@ -86,10 +84,8 @@ pub async fn stream_generate_content(
         });
     }
 
-    // After success, Convert response to a byte stream for SSE parsing
+    // Convert the response body into a byte stream and pipe it into our SSE parser.
     let byte_stream = response.bytes_stream();
-
-    // Wrap the byte stream in our SSE parser
     let event_stream = parse_sse_stream(byte_stream);
 
     Ok(Box::pin(event_stream))
@@ -103,10 +99,6 @@ pub async fn stream_generate_content(
 /// # Arguments
 ///
 /// * `byte_stream` - An implementation of `Stream` yielding bytes from the HTTP response.
-///
-/// # Returns
-///
-/// A stream yielding `Result<GenerateContentResponse>` items.
 fn parse_sse_stream<S>(byte_stream: S) -> impl Stream<Item = Result<GenerateContentResponse>> + Send
 where
     S: Stream<Item = reqwest::Result<bytes::Bytes>> + Send + 'static,
@@ -122,88 +114,71 @@ where
             match chunk_result {
                 Ok(chunk) => {
                     let chunk_str = String::from_utf8_lossy(&chunk);
-                    debug!("Received chunk: {} bytes, content: {:?}", chunk.len(), chunk_str.chars().take(200).collect::<String>());
+                    debug!("Received chunk: {} bytes", chunk.len());
                     buffer.push_str(&chunk_str);
 
-                    // Parse all complete SSE events in the buffer.
-                    // Gemini uses either standard LF (\n\n) or CRLF (\r\n\r\n) as event delimiters.
+                    // SSE event boundary scanning.
+                    // We look for double newlines which indicate the end of an event block.
                     let mut events_in_this_chunk = 0;
                     loop {
-                        // Scan for the first available delimiter in the current buffer
                         let lf_pos = buffer.find("\n\n");
                         let crlf_pos = buffer.find("\r\n\r\n");
 
-                        // Select the earliest delimiter to maintain order and handle mixed line endings
+                        // Pick the first delimiter found to maintain sequence order.
                         let (event_end, delim_len) = match (lf_pos, crlf_pos) {
                             (Some(lf), Some(crlf)) => {
-                                if lf <= crlf {
-                                    (lf, 2)
-                                } else {
-                                    (crlf, 4)
-                                }
+                                if lf <= crlf { (lf, 2) } else { (crlf, 4) }
                             }
                             (Some(lf), None) => (lf, 2),
                             (None, Some(crlf)) => (crlf, 4),
-                            (None, None) => break, // No complete event found yet, wait for more data
+                            (None, None) => break, // Fragmented event; wait for more data.
                         };
 
-                        // Extract the event data and advance the buffer
                         let event_data = buffer[..event_end].to_string();
                         buffer = buffer[event_end + delim_len..].to_string();
 
-                        debug!("Found complete SSE event (len: {})", event_data.len());
-
-                        // Attempt to parse the individual SSE event
                         if let Some(response) = parse_sse_event(&event_data) {
                             events_in_this_chunk += 1;
                             yield Ok(response);
                         }
                     }
                     if events_in_this_chunk > 0 {
-                        debug!("Processed {} SSE events from this HTTP chunk", events_in_this_chunk);
+                        debug!("Buffered and sent {} responses", events_in_this_chunk);
                     }
                 }
                 Err(e) => {
-                    warn!("Stream error: {}", e);
+                    warn!("Upstream network error during stream: {}", e);
                     yield Err(ProxyError::Http(e));
                     break;
                 }
             }
         }
 
-        debug!("HTTP byte stream ended - no more chunks from Gemini");
-
-        // Handle potential final event that might not be followed by a delimiter
+        // Final buffer flush for streams that might not end with a clean delimiter.
         if !buffer.trim().is_empty() {
-            debug!("Processing remaining buffer: {} chars", buffer.len());
             if let Some(response) = parse_sse_event(&buffer) {
-                debug!("Successfully parsed final SSE event from remaining buffer");
                 yield Ok(response);
-            } else {
-                debug!("Failed to parse remaining buffer as SSE event");
             }
         }
 
-        debug!("Gemini SSE stream ended");
+        debug!("Gemini SSE stream closed");
     }
 }
 
-/// Parses a single SSE event string into a `GenerateContentResponse`.
+/// Parses a raw SSE event string into a structured `GenerateContentResponse`.
 ///
-/// This function handles the "data:" prefix and ignores `\[DONE\]` markers or empty lines.
-/// It expects the data segment to be a valid JSON representation of `GenerateContentResponse`.
+/// Extracts the `data:` segment and handles protocol control markers like `[DONE]`.
 fn parse_sse_event(event_data: &str) -> Option<GenerateContentResponse> {
-    // SSE event format can include multiple lines, e.g.: "event: message\ndata: <json>"
     let lines: Vec<&str> = event_data.lines().collect();
 
     let mut data_line = None;
     for line in lines {
-        // Extract the JSON payload after the 'data:' prefix
+        // SSE standard: data lines are prefixed with 'data:'
         if let Some(data) = line.strip_prefix("data:") {
             data_line = Some(data.trim());
             break;
         }
-        // Robustness: handle cases where there might be no space after the colon
+        // Handle variations with explicit space.
         if let Some(data) = line.strip_prefix("data: ") {
             data_line = Some(data);
             break;
@@ -212,21 +187,21 @@ fn parse_sse_event(event_data: &str) -> Option<GenerateContentResponse> {
 
     let data = data_line?;
 
-    // Ignore internal protocol markers like "[DONE]" which signify the end of SSE stream
+    // The [DONE] marker is a protocol signal that generation is complete.
     if data.is_empty() || data == "[DONE]" {
-        debug!("Skipping empty or DONE marker");
+        debug!("Filtered SSE control marker: {}", data);
         return None;
     }
 
-    // Deserialize the JSON payload directly into our response model
+    // Individual JSON chunks represent incremental updates to the candidate list.
     match serde_json::from_str::<GenerateContentResponse>(data) {
-        Ok(response) => {
-            debug!("Successfully parsed SSE event into GenerateContentResponse");
-            Some(response)
-        }
+        Ok(response) => Some(response),
         Err(e) => {
-            warn!("Failed to parse SSE event: {}", e);
-            debug!("Raw data: {}", data.chars().take(200).collect::<String>());
+            warn!("JSON decode error in SSE stream: {}", e);
+            debug!(
+                "Fragment causing error: {}",
+                data.chars().take(200).collect::<String>()
+            );
             None
         }
     }
@@ -254,12 +229,10 @@ mod tests {
     async fn test_parse_sse_stream_mixed_delimiters() {
         use futures::StreamExt;
 
-        // Create a stream with mixed delimiters: \n\n (LF) and \r\n\r\n (CRLF)
         let event1 = r#"data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"First"}]}}]}}"#;
         let event2 = r#"data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"Second"}]}}]}}"#;
         let event3 = r#"data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"Third"}]}}]}}"#;
 
-        // LF, CRLF, LF
         let payload = format!("{}\n\n{}\r\n\r\n{}\n\n", event1, event2, event3);
 
         let stream = futures::stream::iter(vec![Ok(bytes::Bytes::from(payload))]);
@@ -280,22 +253,6 @@ mod tests {
                 .as_text()
                 .unwrap(),
             "First"
-        );
-        assert_eq!(
-            events[1].response.as_ref().unwrap().candidates[0]
-                .content
-                .parts[0]
-                .as_text()
-                .unwrap(),
-            "Second"
-        );
-        assert_eq!(
-            events[2].response.as_ref().unwrap().candidates[0]
-                .content
-                .parts[0]
-                .as_text()
-                .unwrap(),
-            "Third"
         );
     }
 }

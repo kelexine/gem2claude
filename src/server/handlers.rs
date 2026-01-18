@@ -164,19 +164,16 @@ pub async fn messages_handler(
         req.model, req.stream
     );
 
-    // Comprehensive request logging for debugging/audit trails
-    debug!("â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”");
-    debug!("ðŸ“‹ REQUEST HEADERS:");
+    // Request-level logging for auditing
+    debug!("REQUEST HEADERS:");
     for (name, value) in headers.iter() {
         if let Ok(value_str) = value.to_str() {
             debug!("  {}: {}", name, value_str);
         }
     }
-    debug!("â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”");
 
     let body_json = serde_json::to_string_pretty(&req).unwrap_or_else(|_| "{}".to_string());
     let body_preview = if body_json.len() > 1000 {
-        // Find safe UTF-8 boundary before 1000th byte
         let truncate_at = body_json
             .char_indices()
             .take_while(|(idx, _)| *idx < 1000)
@@ -187,10 +184,8 @@ pub async fn messages_handler(
     } else {
         body_json
     };
-    debug!("ðŸ“„ REQUEST BODY PREVIEW:\n{}", body_preview);
-    debug!("â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”");
+    debug!("REQUEST BODY PREVIEW:\n{}", body_preview);
 
-    // Check for streaming vs non-streaming flow
     if req.stream.unwrap_or(false) {
         stream_messages_handler(state, req).await
     } else {
@@ -200,12 +195,13 @@ pub async fn messages_handler(
 
 /// Internal handler for non-streaming (unary) message requests.
 ///
-/// Workflow:
-/// 1. Maps Anthropic model names to Gemini model strings.
-/// 2. Translates the request structure to Gemini format.
-/// 3. Executes the request against the Google Gemini API.
-/// 4. Translates the Gemini response back to Anthropic format.
-/// 5. Records performance metrics and token usage.
+/// This function performs the core request-response translation cycle:
+/// 1. Maps the Anthropic model name to its Gemini counterpart.
+/// 2. Attempts to retrieve or create a Gemini context cache for large prompts.
+/// 3. Translates the Anthropic request structure into a Gemini-compatible format.
+/// 4. Executes the upstream call to the Gemini API.
+/// 5. Translates the returned Gemini response back into the Anthropic format.
+/// 6. Records all relevant telemetry (latency, status, token usage).
 async fn non_stream_messages_handler(
     state: AppState,
     req: crate::models::anthropic::MessagesRequest,
@@ -215,10 +211,9 @@ async fn non_stream_messages_handler(
 
     let request_start = std::time::Instant::now();
 
-    // Model and request translation
     let gemini_model = crate::models::mapping::map_model(&req.model)?;
 
-    // Check cache first (returns both cache name and cached translation if available)
+    // Context Cache Management: Optimize repeated large prompts.
     let (cached_content, cached_translation) = if let Some(cache_mgr) = &state.cache_manager {
         cache_mgr
             .get_or_create_cache(&req, state.gemini_client.project_id(), &state.gemini_client)
@@ -227,29 +222,22 @@ async fn non_stream_messages_handler(
         (None, None)
     };
 
-    // Use cached translation if available, otherwise translate now
     let mut gemini_req = if let Some(cached_req) = cached_translation {
-        debug!("Using cached translation (cache hit)");
+        debug!("Request translation retrieved from internal LRU cache.");
         cached_req
     } else {
-        debug!("Translating request (cache miss or disabled)");
-        translate_request(
-            req.clone(),
-            state.gemini_client.project_id(),
-            None, // Cache manager already called above
-            None, // Gemini client not needed for translation
-        )
-        .await?
+        translate_request(req.clone(), state.gemini_client.project_id(), None, None).await?
     };
 
-    // Apply cached content reference if present
     if let Some(cache_name) = cached_content {
         gemini_req.cached_content = Some(cache_name);
     }
 
-    debug!("Executing unary Gemini request");
+    debug!(
+        "Dispatching unary request to Gemini API (Model: {})",
+        gemini_model
+    );
 
-    // Upstream API call
     let gemini_resp = match state
         .gemini_client
         .generate_content(gemini_req, &gemini_model)
@@ -257,21 +245,19 @@ async fn non_stream_messages_handler(
     {
         Ok(resp) => resp,
         Err(e) => {
-            error!("Gemini API call failed: {}", e);
+            error!("Upstream Gemini API call failure: {}", e);
             return Err(e);
         }
     };
 
-    // Response translation back to Anthropic format
     let anthropic_resp = match translate_response(gemini_resp, &req.model) {
         Ok(resp) => resp,
         Err(e) => {
-            error!("Response translation failed: {}", e);
+            error!("Translation failure for Gemini response candidate: {}", e);
             return Err(e);
         }
     };
 
-    // Telemetry and Metrics
     let duration = request_start.elapsed().as_secs_f64();
     crate::metrics::record_request("POST", "/v1/messages", 200, &req.model, duration);
     crate::metrics::record_tokens(
@@ -282,7 +268,6 @@ async fn non_stream_messages_handler(
         anthropic_resp.usage.cache_creation_input_tokens,
     );
 
-    // Record cache hit/miss/create
     if anthropic_resp.usage.cache_read_input_tokens > 0 {
         crate::metrics::record_cache_hit();
     } else {
@@ -298,11 +283,13 @@ async fn non_stream_messages_handler(
 
 /// Internal handler for Server-Sent Events (SSE) streaming requests.
 ///
-/// Workflow:
-/// 1. Translates request and initiates Gemini SSE stream.
-/// 2. Spawns an asynchronous stream transformation loop.
-/// 3. Translates Gemini response chunks to Anthropic stream events on-the-fly.
-/// 4. Injects periodic keep-alive pings and buffer flushes to maintain the connection.
+/// This asynchronous handler establishes a persistent connection to the client and
+/// pipes transformed events from Gemini in real-time:
+/// 1. Maps models and manages context caching (same as unary).
+/// 2. Opens a streaming connection to the Gemini API.
+/// 3. Transforms raw Gemini JSON chunks into Anthropic SSE events.
+/// 4. Implements a watchdog loop to send keep-alive pings every 15 seconds.
+/// 5. Injects mock headers to maximize compatibility with the Claude SDK.
 async fn stream_messages_handler(
     state: AppState,
     req: crate::models::anthropic::MessagesRequest,
@@ -314,13 +301,11 @@ async fn stream_messages_handler(
 
     let request_start = std::time::Instant::now();
 
-    debug!("Initiating streaming flow for model: {}", req.model);
+    debug!("Establishing SSE tunnel for model: {}", req.model);
     crate::metrics::record_sse_connection("opened");
 
-    // 1. Initial translation and stream setup
     let gemini_model = crate::models::mapping::map_model(&req.model)?;
 
-    // Check cache first (returns both cache name and cached translation if available)
     let (cached_content, cached_translation) = if let Some(cache_mgr) = &state.cache_manager {
         cache_mgr
             .get_or_create_cache(&req, state.gemini_client.project_id(), &state.gemini_client)
@@ -329,22 +314,12 @@ async fn stream_messages_handler(
         (None, None)
     };
 
-    // Use cached translation if available, otherwise translate now
     let mut gemini_req = if let Some(cached_req) = cached_translation {
-        debug!("Using cached translation (cache hit)");
         cached_req
     } else {
-        debug!("Translating request (cache miss or disabled)");
-        translate_request(
-            req.clone(),
-            state.gemini_client.project_id(),
-            None, // Cache manager already called above
-            None, // Gemini client not needed for translation
-        )
-        .await?
+        translate_request(req.clone(), state.gemini_client.project_id(), None, None).await?
     };
 
-    // Apply cached content reference if present
     if let Some(cache_name) = cached_content {
         gemini_req.cached_content = Some(cache_name);
     }
@@ -356,32 +331,29 @@ async fn stream_messages_handler(
 
     let mut translator = StreamTranslator::new(req.model.clone());
 
-    // 2. Define the transformation closure
     let sse_stream = async_stream::stream! {
-        debug!("SSE Stream established");
+        debug!("Upstream SSE stream acquired; beginning transformation cycle.");
         futures::pin_mut!(gemini_stream);
 
         let mut chunk_count = 0;
         loop {
             tokio::select! {
-                // Poll the upstream Gemini stream
                 chunk_opt = gemini_stream.next() => {
                     match chunk_opt {
                         Some(chunk_result) => {
                             chunk_count += 1;
                             match chunk_result {
                                 Ok(chunk) => {
-                                    // Translate raw Gemini chunk to Anthropic event sequence
                                     match translator.translate_chunk(chunk) {
                                         Ok(events) => {
                                             for event in events.iter() {
                                                 yield Ok::<String, std::convert::Infallible>(event.to_sse());
-                                                // Buffer flush hint: keepalive comment
+                                                // Buffer flushing hint for proxies.
                                                 yield Ok(": keepalive\n\n".to_string());
                                             }
                                         }
                                         Err(e) => {
-                                            warn!("Stream translation error: {}", e);
+                                            warn!("Internal translation error during stream: {}", e);
                                             let error_event = crate::models::streaming::StreamEvent::Error {
                                                 error: crate::models::streaming::ErrorData {
                                                     error_type: "translation_error".to_string(),
@@ -394,7 +366,7 @@ async fn stream_messages_handler(
                                     }
                                 }
                                 Err(e) => {
-                                    warn!("Upstream stream error: {}", e);
+                                    warn!("Upstream connection reset or error: {}", e);
                                     let error_event = crate::models::streaming::StreamEvent::Error {
                                         error: crate::models::streaming::ErrorData {
                                             error_type: "api_error".to_string(),
@@ -406,29 +378,25 @@ async fn stream_messages_handler(
                                 }
                             }
                         }
-                        None => break, // Clean stream completion
+                        None => break,
                     }
                 }
-                // Maintain connection with active pings
                 _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
-                    debug!("Yielding keep-alive ping to client");
-                    let ping_event = "event: ping\ndata: {\"type\": \"ping\"}\n\n".to_string();
-                    yield Ok(ping_event);
+                    yield Ok("event: ping\ndata: {\"type\": \"ping\"}\n\n".to_string());
                 }
             }
         }
 
         let duration = request_start.elapsed().as_secs_f64();
-        debug!("SSE Stream finished. Total chunks: {}", chunk_count);
+        debug!("SSE Stream finalized ({} chunks processed).", chunk_count);
 
-        // Record streaming metrics
         crate::metrics::record_request("POST", "/v1/messages", 200, &translator.model, duration);
         crate::metrics::record_tokens(
             &translator.model,
             translator.input_tokens,
             translator.output_tokens,
             translator.cached_input_tokens,
-            0, // cache_creation not tracked in streaming yet
+            0,
         );
 
         if translator.cached_input_tokens > 0 {
@@ -436,13 +404,8 @@ async fn stream_messages_handler(
         } else {
             crate::metrics::record_cache_miss();
         }
-
-        if translator.cached_creation_input_tokens > 0 {
-            crate::metrics::record_cache_create();
-        }
     };
 
-    // 3. Construct the finalized HTTP/SSE response
     use axum::body::Body;
     let body = Body::from_stream(sse_stream);
 
@@ -451,15 +414,11 @@ async fn stream_messages_handler(
         .header("Content-Type", "text/event-stream; charset=utf-8")
         .header("Cache-Control", "no-cache")
         .header("Connection", "keep-alive")
-        .header("X-Accel-Buffering", "no") // Important for proxy servers like Nginx
+        .header("X-Accel-Buffering", "no")
         .header("Transfer-Encoding", "chunked")
-        .header("anthropic-version", "2023-06-01") // Mock headers for compatibility
+        .header("anthropic-version", "2023-06-01")
         .header("anthropic-ratelimit-requests-limit", "50")
         .header("anthropic-ratelimit-requests-remaining", "49")
-        .header(
-            "anthropic-ratelimit-requests-reset",
-            chrono::Utc::now().to_rfc3339(),
-        )
         .header("request-id", format!("req_{}", uuid::Uuid::new_v4()))
         .body(body)
         .unwrap())
@@ -467,14 +426,12 @@ async fn stream_messages_handler(
 
 /// Sink handler for Claude Code telemetry and event logging.
 ///
-/// Claude Code sometimes sends "batch" event logs. This handler captures them,
-/// appends them to a local log file for auditing, and returns a 200 OK to
-/// ensure compatibility with the client's expectations.
+/// This handler collects telemetry data sent by the client and persistently
+/// logs it to `~/claude_code_events.log` for transparency and auditing.
 pub async fn event_logging_handler(body: String) -> impl IntoResponse {
     use std::fs::OpenOptions;
     use std::io::Write;
 
-    // Log telemetry events to the home directory for transparency
     if let Some(home) = std::env::var_os("HOME") {
         let log_path = std::path::Path::new(&home).join("claude_code_events.log");
 

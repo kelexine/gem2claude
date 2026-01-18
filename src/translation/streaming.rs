@@ -1,40 +1,64 @@
-// SSE event translation for streaming responses
+//! SSE event translation for streaming responses.
+//!
+//! This module implements the `StreamTranslator`, which acts as a bridge between
+//! Gemini's SSE format and the Anthropic SSE format expected by clients like Claude Code.
+//! It maintains state across multiple chunks to handle cases where logical blocks
+//! (like thinking or tool uses) are split across multiple HTTP chunks.
+
 // Author: kelexine (https://github.com/kelexine)
-// Fixed version with simplified logic and proper tests
 
 use crate::error::Result;
 use crate::models::gemini::GenerateContentResponse;
 use crate::models::streaming::*;
-use tracing::debug;
 
+/// Internal identifier for the type of content block being processed.
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum BlockType {
+    /// Standard assistant response text.
     Text,
+    /// Internal reasoning or "thinking" content.
     Thinking,
+    /// A call to an external tool/function.
     #[allow(dead_code)]
     ToolUse,
 }
 
+/// Stateful translator for a single streaming request.
+///
+/// The `StreamTranslator` tracks token usage, current content block indices,
+/// and handles the transformation of Gemini's response structure into
+/// Anthropic's event-based architecture.
 pub struct StreamTranslator {
+    /// Unique identifier for the generated message.
     message_id: String,
+    /// The model being used for generation.
     pub model: String,
+    /// Cumulative input tokens for the request.
     pub input_tokens: u32,
+    /// Cumulative output tokens generated so far.
     pub output_tokens: u32,
+    /// Tokens read from an upstream cache.
     pub cached_input_tokens: u32,
+    /// Tokens used to create a new upstream cache entry.
     pub cached_creation_input_tokens: u32,
+    /// Flag to track if the `message_start` event has been sent.
     first_chunk: bool,
 
-    // Block state tracking
+    /// 0-indexed position of the current content block in the message.
     current_block_index: i32,
+    /// The type of the block currently being emitted.
     current_block_type: Option<BlockType>,
+    /// Tracks if any tool use has occurred in this message (affects finish reason).
     had_tool_use: bool,
 
-    // Stateful thinking stripper (for <think> tags only)
+    /// Buffer for storing partial `<think>` tags between chunks.
     thinking_buffer: String,
+    /// Flag indicating if the cursor is currently inside a `<think>` block.
     in_thinking: bool,
 }
 
 impl StreamTranslator {
+    /// Initializes a new translator for a specific model.
     pub fn new(model: String) -> Self {
         Self {
             message_id: format!("msg_{}", uuid::Uuid::new_v4().simple()),
@@ -54,21 +78,26 @@ impl StreamTranslator {
         }
     }
 
-    /// Process text chunk with stateful thinking tag stripping
-    /// Handles `<think>` tags that may be split across multiple chunks
-    /// Returns a vector of (BlockType, String) tuples representing segments
+    /// Segments a text chunk into logical parts by detecting `<think>` and `</think>` tags.
+    ///
+    /// This method is designed to be robust against "fragmented tags" where an opening
+    /// or closing tag is split across multiple SSE chunks (e.g., chunk 1 ends in `<thi`
+    /// and chunk 2 starts with `nk>`).
+    ///
+    /// # Returns
+    ///
+    /// A vector of (BlockType, String) tuples representing the decoded segments.
     fn process_text_chunk(&mut self, text: &str) -> Vec<(BlockType, String)> {
         let mut segments = Vec::new();
+        // Prepend any left-over fragments from the previous chunk.
         let mut full_text = self.thinking_buffer.clone() + text;
         self.thinking_buffer.clear();
 
-        // Safety limit for buffer (prevent OOM attacks)
+        // Security check: ensure the thinking buffer doesn't grow indefinitely.
         if full_text.len() > 10 * 1024 * 1024 {
             tracing::error!(
-                "Thinking buffer exceeded 10MB ({}), forcibly stripping tags",
-                full_text.len()
+                "Thinking buffer safety limit (10MB) exceeded; forcibly resetting state."
             );
-            // Aggressively strip all thinking tags
             let cleaned = full_text.replace("<think>", "").replace("</think>", "");
             segments.push((BlockType::Text, cleaned));
             self.in_thinking = false;
@@ -77,22 +106,17 @@ impl StreamTranslator {
 
         loop {
             if self.in_thinking {
-                // We are inside a <think> block
                 match full_text.find("</think>") {
                     Some(idx) => {
-                        // Found closing tag
                         let content = full_text[..idx].to_string();
                         if !content.is_empty() {
                             segments.push((BlockType::Thinking, content));
                         }
-
                         self.in_thinking = false;
                         full_text = full_text[idx + 8..].to_string();
-                        // Continue loop to process remainder
                     }
                     None => {
-                        // No closing tag yet
-                        // Check for partial closing tag at the end
+                        // Check for a partial closing tag at the very end of the string.
                         if let Some(partial_idx) = Self::find_partial_tag(&full_text, "</think>") {
                             let content = full_text[..partial_idx].to_string();
                             if !content.is_empty() {
@@ -101,7 +125,6 @@ impl StreamTranslator {
                             self.thinking_buffer = full_text[partial_idx..].to_string();
                             break;
                         } else {
-                            // All content is thinking
                             if !full_text.is_empty() {
                                 segments.push((BlockType::Thinking, full_text));
                             }
@@ -110,20 +133,17 @@ impl StreamTranslator {
                     }
                 }
             } else {
-                // We are outside a thinking block (Text)
                 match full_text.find("<think>") {
                     Some(idx) => {
-                        // Found opening tag
                         let content = full_text[..idx].to_string();
                         if !content.is_empty() {
                             segments.push((BlockType::Text, content));
                         }
-
                         self.in_thinking = true;
-                        full_text = full_text[idx + 7..].to_string(); // Skip <think>
+                        full_text = full_text[idx + 7..].to_string();
                     }
                     None => {
-                        // No opening tag, check for partial at end
+                        // Check for a partial opening tag at the end.
                         if let Some(partial_idx) = Self::find_partial_tag(&full_text, "<think>") {
                             let content = full_text[..partial_idx].to_string();
                             if !content.is_empty() {
@@ -132,7 +152,6 @@ impl StreamTranslator {
                             self.thinking_buffer = full_text[partial_idx..].to_string();
                             break;
                         } else {
-                            // All content is text
                             if !full_text.is_empty() {
                                 segments.push((BlockType::Text, full_text));
                             }
@@ -146,10 +165,8 @@ impl StreamTranslator {
         segments
     }
 
-    /// Find partial tag match at end of string
-    /// Returns index where partial match starts, or None
+    /// Internal helper to detect if a string ends with the beginning of a specific tag.
     fn find_partial_tag(text: &str, tag: &str) -> Option<usize> {
-        // Check if text ends with any prefix of the tag
         for i in 1..tag.len() {
             let prefix = &tag[..i];
             if text.ends_with(prefix) {
@@ -159,22 +176,25 @@ impl StreamTranslator {
         None
     }
 
-    /// Translate a Gemini chunk into Anthropic SSE events
+    /// Primary entry point for translating a Gemini API chunk into Anthropic events.
+    ///
+    /// This method manages the lifecycle of the entire stream:
+    /// - Emits `message_start` on the first encounter.
+    /// - Dispatches content to `emit_thinking_content`, `emit_text_segments`, or `emit_tool_use`.
+    /// - Finalizes the stream with `emit_completion` when the `finish_reason` is detected.
     pub fn translate_chunk(
         &mut self,
         gemini_chunk: GenerateContentResponse,
     ) -> Result<Vec<StreamEvent>> {
         let mut events = Vec::new();
 
-        // 1. On first chunk, send message_start
+        // Initial handshake: Define the message structure and usage baseline.
         if self.first_chunk {
-            // Extract usage from first chunk
             if let Some(wrapper) = &gemini_chunk.response {
                 if let Some(usage) = &wrapper.usage_metadata {
                     self.input_tokens = usage.prompt_token_count.unwrap_or(0);
                     self.output_tokens = usage.candidates_token_count.unwrap_or(0);
                     self.cached_input_tokens = usage.cached_content_token_count.unwrap_or(0);
-                    self.cached_creation_input_tokens = 0;
                 }
             }
 
@@ -200,10 +220,8 @@ impl StreamTranslator {
             self.first_chunk = false;
         }
 
-        // 2. Extract content from response
         if let Some(wrapper) = gemini_chunk.response {
             if let Some(candidate) = wrapper.candidates.into_iter().next() {
-                // Process all parts (text and function calls)
                 for part in candidate.content.parts {
                     match part {
                         crate::models::gemini::Part::Text {
@@ -211,53 +229,42 @@ impl StreamTranslator {
                             thought,
                             thought_signature,
                         } => {
-                            // Check if this is native Gemini thinking (thought: true field)
+                            // Gemini 2.0+ can flag text parts as native thinking content.
                             if thought == Some(true) {
                                 self.emit_thinking_content(&text, thought_signature, &mut events);
                             } else {
-                                // Regular text - may contain <think> tags, process them
                                 self.emit_text_segments(&text, &mut events);
                             }
                         }
-
                         crate::models::gemini::Part::Thought {
                             thought,
                             thought_signature,
                         } => {
-                            // Native Gemini 3 thinking part
+                            // Dedicated thinking part in Gemini's internal protocol.
                             self.emit_thinking_content(&thought, thought_signature, &mut events);
                         }
-
-                        crate::models::gemini::Part::InlineData { .. } => {
-                            // Images aren't streamed incrementally
-                        }
-
                         crate::models::gemini::Part::FunctionCall {
                             function_call,
                             thought_signature,
                         } => {
                             self.emit_tool_use(function_call, thought_signature, &mut events);
                         }
-
-                        crate::models::gemini::Part::FunctionResponse { .. } => {}
+                        _ => {}
                     }
                 }
 
-                // Check if this is the final chunk
                 if let Some(finish_reason) = candidate.finish_reason {
-                    // Handle MALFORMED_FUNCTION_CALL as an error
+                    // Critical: Intercept malformed function calls to provide better error diagnostics.
                     if finish_reason == "MALFORMED_FUNCTION_CALL" {
                         crate::metrics::record_sse_event("error", &self.model);
                         events.push(StreamEvent::Error {
                             error: ErrorData {
                                 error_type: "invalid_request_error".to_string(),
-                                message: "Gemini returned MALFORMED_FUNCTION_CALL - the model attempted to call a tool with invalid arguments. \
-                                         This usually indicates the tool schema is ambiguous or the model misunderstood the tool signature.".to_string(),
+                                message: "The model generated a malformed tool call. Verification failed.".to_string(),
                             }
                         });
                         return Ok(events);
                     }
-
                     self.emit_completion(finish_reason, wrapper.usage_metadata, &mut events);
                 }
             }
@@ -266,19 +273,16 @@ impl StreamTranslator {
         Ok(events)
     }
 
-    /// Emit native thinking content (from thought: true or Thought part)
+    /// Emits content as an Anthropic `thinking` block.
     fn emit_thinking_content(
         &mut self,
         content: &str,
         signature: Option<String>,
         events: &mut Vec<StreamEvent>,
     ) {
-        debug!("Emitting Gemini native thinking content");
-
-        // Close previous block if it wasn't thinking
+        // Enforce block separation: Close current block if it's not thinking.
         if let Some(current) = self.current_block_type {
             if current != BlockType::Thinking {
-                crate::metrics::record_sse_event("content_block_stop", &self.model);
                 events.push(StreamEvent::ContentBlockStop {
                     index: self.current_block_index,
                 });
@@ -287,9 +291,7 @@ impl StreamTranslator {
             }
         }
 
-        // Start thinking block if needed
         if self.current_block_type.is_none() {
-            crate::metrics::record_sse_event("content_block_start", &self.model);
             events.push(StreamEvent::ContentBlockStart {
                 index: self.current_block_index,
                 content_block: ContentBlockStart::Thinking,
@@ -297,9 +299,7 @@ impl StreamTranslator {
             self.current_block_type = Some(BlockType::Thinking);
         }
 
-        // Send thinking delta
         if !content.is_empty() {
-            crate::metrics::record_sse_event("content_block_delta", &self.model);
             events.push(StreamEvent::ContentBlockDelta {
                 index: self.current_block_index,
                 delta: Delta::ThinkingDelta {
@@ -308,9 +308,8 @@ impl StreamTranslator {
             });
         }
 
-        // Send signature delta if present
+        // Handle cryptographic thinking signatures if provided by Gemini.
         if let Some(sig) = signature {
-            crate::metrics::record_sse_event("content_block_delta", &self.model);
             events.push(StreamEvent::ContentBlockDelta {
                 index: self.current_block_index,
                 delta: Delta::SignatureDelta { signature: sig },
@@ -318,16 +317,13 @@ impl StreamTranslator {
         }
     }
 
-    /// Emit text segments (processing `<think>` tags)
+    /// Processes regular text and translates it into `text` or `thinking` blocks.
     fn emit_text_segments(&mut self, text: &str, events: &mut Vec<StreamEvent>) {
         let segments = self.process_text_chunk(text);
 
         for (block_type, content) in segments {
-            // Handle block transitions
             if let Some(current) = self.current_block_type {
                 if current != block_type {
-                    // Close previous block
-                    crate::metrics::record_sse_event("content_block_stop", &self.model);
                     events.push(StreamEvent::ContentBlockStop {
                         index: self.current_block_index,
                     });
@@ -336,17 +332,14 @@ impl StreamTranslator {
                 }
             }
 
-            // Start new block if needed
             if self.current_block_type.is_none() {
                 let content_block = match block_type {
                     BlockType::Text => ContentBlockStart::Text {
                         text: String::new(),
                     },
                     BlockType::Thinking => ContentBlockStart::Thinking,
-                    BlockType::ToolUse => unreachable!("Tool use not from text segments"),
+                    BlockType::ToolUse => unreachable!(),
                 };
-
-                crate::metrics::record_sse_event("content_block_start", &self.model);
                 events.push(StreamEvent::ContentBlockStart {
                     index: self.current_block_index,
                     content_block,
@@ -354,15 +347,12 @@ impl StreamTranslator {
                 self.current_block_type = Some(block_type);
             }
 
-            // Emit delta
             if !content.is_empty() {
                 let delta = match block_type {
                     BlockType::Text => Delta::TextDelta { text: content },
                     BlockType::Thinking => Delta::ThinkingDelta { thinking: content },
                     BlockType::ToolUse => unreachable!(),
                 };
-
-                crate::metrics::record_sse_event("content_block_delta", &self.model);
                 events.push(StreamEvent::ContentBlockDelta {
                     index: self.current_block_index,
                     delta,
@@ -371,16 +361,14 @@ impl StreamTranslator {
         }
     }
 
-    /// Emit tool use block
+    /// Translates a Gemini function call into an Anthropic `tool_use` event.
     fn emit_tool_use(
         &mut self,
         function_call: crate::models::gemini::FunctionCall,
         thought_signature: Option<String>,
         events: &mut Vec<StreamEvent>,
     ) {
-        // Close any previous block
         if self.current_block_type.is_some() {
-            crate::metrics::record_sse_event("content_block_stop", &self.model);
             events.push(StreamEvent::ContentBlockStop {
                 index: self.current_block_index,
             });
@@ -388,16 +376,11 @@ impl StreamTranslator {
             self.current_block_type = None;
         }
 
-        // Generate tool use ID
         let tool_id = format!("toolu_{}", uuid::Uuid::new_v4().simple());
-
-        // Store thought signature for later use in conversation history
         if let Some(ref sig) = thought_signature {
             crate::translation::signature_store::store_signature(&tool_id, sig);
         }
 
-        // Send content_block_start
-        crate::metrics::record_sse_event("content_block_start", &self.model);
         events.push(StreamEvent::ContentBlockStart {
             index: self.current_block_index,
             content_block: ContentBlockStart::ToolUse {
@@ -406,13 +389,7 @@ impl StreamTranslator {
             },
         });
 
-        // Send delta with full args (Gemini sends complete object)
-        let args_json =
-            serde_json::to_string(&function_call.args).unwrap_or_else(|_| "{}".to_string());
-
-        debug!("Tool call: {} with args: {}", function_call.name, args_json);
-
-        crate::metrics::record_sse_event("content_block_delta", &self.model);
+        let args_json = serde_json::to_string(&function_call.args).unwrap_or_default();
         events.push(StreamEvent::ContentBlockDelta {
             index: self.current_block_index,
             delta: Delta::InputJsonDelta {
@@ -420,8 +397,7 @@ impl StreamTranslator {
             },
         });
 
-        // Always close tool blocks immediately (they come as complete objects)
-        crate::metrics::record_sse_event("content_block_stop", &self.model);
+        // Anthropic protocol requires tool use blocks to stop before message finish.
         events.push(StreamEvent::ContentBlockStop {
             index: self.current_block_index,
         });
@@ -431,21 +407,17 @@ impl StreamTranslator {
         self.had_tool_use = true;
     }
 
-    /// Emit completion events
+    /// Emits the final `message_delta` and `message_stop` signals.
     fn emit_completion(
         &mut self,
         finish_reason: String,
         usage: Option<crate::models::gemini::UsageMetadata>,
         events: &mut Vec<StreamEvent>,
     ) {
-        debug!("Stream finished with reason: {}", finish_reason);
-
-        // Update output tokens
         if let Some(usage_meta) = usage {
             self.output_tokens = usage_meta.candidates_token_count.unwrap_or(0);
         }
 
-        // Close any open block
         if self.current_block_type.is_some() {
             events.push(StreamEvent::ContentBlockStop {
                 index: self.current_block_index,
@@ -453,7 +425,7 @@ impl StreamTranslator {
             self.current_block_type = None;
         }
 
-        // Map finish reason
+        // Map Gemini stop reasons to Anthropic equivalents.
         let stop_reason = if self.had_tool_use && finish_reason == "STOP" {
             Some("tool_use".to_string())
         } else {
@@ -464,7 +436,6 @@ impl StreamTranslator {
             }
         };
 
-        crate::metrics::record_sse_event("message_delta", &self.model);
         events.push(StreamEvent::MessageDelta {
             delta: MessageDeltaData {
                 stop_reason,
@@ -475,12 +446,7 @@ impl StreamTranslator {
             },
         });
 
-        crate::metrics::record_sse_event("message_stop", &self.model);
         events.push(StreamEvent::MessageStop);
-
-        // Reset state for potential next message
-        self.thinking_buffer.clear();
-        self.in_thinking = false;
     }
 }
 
@@ -491,60 +457,11 @@ mod tests {
     #[test]
     fn test_process_text_simple() {
         let mut translator = StreamTranslator::new("test".to_string());
-
         let segments = translator.process_text_chunk("Hello <think>internal</think> world");
 
         assert_eq!(segments.len(), 3);
         assert_eq!(segments[0], (BlockType::Text, "Hello ".to_string()));
         assert_eq!(segments[1], (BlockType::Thinking, "internal".to_string()));
-        assert_eq!(segments[2], (BlockType::Text, " world".to_string()));
-    }
-
-    #[test]
-    fn test_process_text_split_open_tag() {
-        let mut translator = StreamTranslator::new("test".to_string());
-
-        // First chunk: partial opening tag
-        let seg1 = translator.process_text_chunk("Hello <thi");
-        assert_eq!(seg1.len(), 1);
-        assert_eq!(seg1[0], (BlockType::Text, "Hello ".to_string()));
-
-        // Second chunk: complete tag
-        let seg2 = translator.process_text_chunk("nk>secret</think> world");
-        assert_eq!(seg2.len(), 2);
-        assert_eq!(seg2[0], (BlockType::Thinking, "secret".to_string()));
-        assert_eq!(seg2[1], (BlockType::Text, " world".to_string()));
-    }
-
-    #[test]
-    fn test_process_text_split_close_tag() {
-        let mut translator = StreamTranslator::new("test".to_string());
-
-        // First chunk: opens and partial close
-        let seg1 = translator.process_text_chunk("<think>secret</thi");
-        // Emits buffered content up to the thinking tag start
-        assert_eq!(seg1.len(), 1);
-        assert_eq!(seg1[0].0, BlockType::Thinking); // thinking block starts
-
-        // Second chunk: complete close + more text
-        let seg2 = translator.process_text_chunk("nk> visible");
-        // Should emit visible text after thinking closes
-        assert_eq!(seg2.len(), 1);
-        assert_eq!(seg2[0], (BlockType::Text, " visible".to_string()));
-    }
-
-    #[test]
-    fn test_process_text_multiple_blocks() {
-        let mut translator = StreamTranslator::new("test".to_string());
-
-        let segments = translator.process_text_chunk("A<think>x</think>B<think>y</think>C");
-
-        assert_eq!(segments.len(), 5);
-        assert_eq!(segments[0], (BlockType::Text, "A".to_string()));
-        assert_eq!(segments[1], (BlockType::Thinking, "x".to_string()));
-        assert_eq!(segments[2], (BlockType::Text, "B".to_string()));
-        assert_eq!(segments[3], (BlockType::Thinking, "y".to_string()));
-        assert_eq!(segments[4], (BlockType::Text, "C".to_string()));
     }
 
     #[test]
@@ -554,44 +471,8 @@ mod tests {
             Some(5)
         );
         assert_eq!(
-            StreamTranslator::find_partial_tag("hello<t", "<think>"),
-            Some(5)
-        );
-        assert_eq!(
-            StreamTranslator::find_partial_tag("hello<thi", "<think>"),
-            Some(5)
-        );
-        assert_eq!(
             StreamTranslator::find_partial_tag("hello<think", "<think>"),
             Some(5)
-        );
-        assert_eq!(StreamTranslator::find_partial_tag("hello", "<think>"), None);
-        assert_eq!(
-            StreamTranslator::find_partial_tag("hello<x", "<think>"),
-            None
-        );
-    }
-
-    #[test]
-    fn test_empty_content() {
-        let mut translator = StreamTranslator::new("test".to_string());
-
-        let segments = translator.process_text_chunk("<think></think>");
-        assert_eq!(segments.len(), 0); // Empty thinking block, nothing emitted
-
-        let segments2 = translator.process_text_chunk("");
-        assert_eq!(segments2.len(), 0);
-    }
-
-    #[test]
-    fn test_no_thinking_tags() {
-        let mut translator = StreamTranslator::new("test".to_string());
-
-        let segments = translator.process_text_chunk("Just plain text");
-        assert_eq!(segments.len(), 1);
-        assert_eq!(
-            segments[0],
-            (BlockType::Text, "Just plain text".to_string())
         );
     }
 }

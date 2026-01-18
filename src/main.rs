@@ -1,4 +1,24 @@
-// gem2claude - OAuth-based Gemini API to Claude Code Compatible Proxy
+//! gem2claude - OAuth-based Gemini API to Claude Code Compatible Proxy
+//!
+//! # Application Entry Point
+//!
+//! This is the main binary crate for `gem2claude`. It orchestrates the entire
+//! application lifecycle, from configuration loading and logging initialization
+//! to authentication handling and server startup.
+//!
+//! ## Execution Phases
+//!
+//! 1.  **Arguments Parsing**: Processes CLI flags using `clap`.
+//! 2.  **Configuration**: Loads settings from `config.toml` and environment variables.
+//! 3.  **Logging**: Initializes the `tracing` subscriber for structured logging.
+//! 4.  **Authentication**:
+//!     *   If `--login` is passed: Executes the interactive OAuth flow and exits.
+//!     *   Otherwise: Loads existing credentials and initializes the `OAuthManager`.
+//! 5.  **Initialization**: performs the `loadCodeAssist` handshake to resolve the
+//!     Google Cloud Project ID.
+//! 6.  **Server Startup**: Binds the Axum router to the configured port and starts listening.
+//! 7.  **Shutdown**: Waits for SIGINT/SIGTERM to perform a graceful shutdown.
+
 // Author: kelexine (https://github.com/kelexine)
 
 use anyhow::Result;
@@ -13,6 +33,14 @@ use std::net::SocketAddr;
 use tokio::signal;
 use tracing::info;
 
+/// Main asynchronous entry point.
+///
+/// Orchestrates the boot sequence and manages the application runtime.
+///
+/// # Returns
+///
+/// Returns `Ok(())` on clean shutdown, or an `anyhow::Error` if a critical
+/// failure occurs during startup or runtime.
 #[tokio::main]
 async fn main() -> Result<()> {
     // Parse CLI arguments
@@ -58,6 +86,10 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Listens for OS termination signals (Ctrl+C, SIGTERM).
+///
+/// This future completes when a shutdown signal is received, triggering
+/// the graceful shutdown mechanism of the web server.
 async fn shutdown_signal() {
     let ctrl_c = async {
         signal::ctrl_c()

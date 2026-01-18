@@ -1,4 +1,11 @@
-// OAuth manager with credential loading and automatic refresh
+//! Google OAuth2 token management.
+//!
+//! This module provides the `OAuthManager`, which is responsible for the entire
+//! lifecycle of Google Cloud access tokens. It ensures tokens are loaded securely
+//! from disk, validates file permissions to prevent accidental leakage, and
+//! implements a thread-safe "double-checked locking" refresh mechanism to
+//! prevent multiple concurrent requests from triggering redundant token refreshes.
+
 // Author: kelexine (https://github.com/kelexine)
 
 use super::OAuthCredentials;
@@ -11,29 +18,39 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 
-/// Google OAuth2 credentials for Gemini CLI (public, for installed apps)
-/// Source: gemini-cli-0.23.0/packages/core/src/code_assist/oauth2.ts
+/// Public Client ID for the Gemini CLI.
+/// Used for OAuth2 device and installed-app flows.
 pub const OAUTH_CLIENT_ID: &str =
     "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
+
+/// Public Client Secret for the Gemini CLI.
 pub const OAUTH_CLIENT_SECRET: &str = "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";
 
+/// Manages Google OAuth2 credentials and provides valid access tokens.
+///
+/// The `OAuthManager` uses an `Arc<RwLock>` to allow high-concurrency access to the
+/// current token, with a `Mutex` to serialize refresh attempts.
 #[derive(Clone)]
 pub struct OAuthManager {
+    /// In-memory cache of the current OAuth2 credentials.
     credentials: Arc<RwLock<OAuthCredentials>>,
-    refresh_lock: Arc<Mutex<()>>, // Prevents thundering herd on refresh
+    /// Lock used to prevent "thundering herd" refresh attempts when a token expires.
+    refresh_lock: Arc<Mutex<()>>,
+    /// Configuration for refresh thresholds and file paths.
     config: OAuthConfig,
 }
 
 impl OAuthManager {
-    /// Create a new OAuth manager and load credentials
+    /// Initializes a new `OAuthManager` by loading credentials from the configured path.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ProxyError::InvalidCredentials` if the file is missing, malformed,
+    /// or has insecure permissions.
     pub async fn new(config: &OAuthConfig) -> Result<Self> {
         let credentials = Self::load_credentials(&config.credentials_path)?;
 
-        debug!("Loaded OAuth credentials");
-        debug!(
-            "Token expires in {} seconds",
-            credentials.expires_in_seconds()
-        );
+        debug!("Loaded OAuth credentials from {}", config.credentials_path);
 
         Ok(Self {
             credentials: Arc::new(RwLock::new(credentials)),
@@ -42,7 +59,7 @@ impl OAuthManager {
         })
     }
 
-    /// Load OAuth credentials from file
+    /// Reads credentials from the filesystem and performs basic validation.
     fn load_credentials(path: &str) -> Result<OAuthCredentials> {
         let path = Path::new(path);
 
@@ -53,7 +70,7 @@ impl OAuthManager {
             )));
         }
 
-        // Validate file permissions (must be 0600 or 0400)
+        // Validate that credentials file is not group- or world-readable.
         Self::validate_permissions(path)?;
 
         let contents = fs::read_to_string(path).map_err(|e| {
@@ -61,11 +78,14 @@ impl OAuthManager {
         })?;
 
         serde_json::from_str(&contents).map_err(|e| {
-            ProxyError::InvalidCredentials(format!("Invalid credentials format: {}", e))
+            ProxyError::InvalidCredentials(format!("Invalid credentials JSON format: {}", e))
         })
     }
 
-    /// Validate file permissions are secure
+    /// Ensures that the credentials file has secure permissions (0600 or 0400).
+    ///
+    /// This is a critical security check to prevent sensitive tokens from being
+    /// accessible to other users on the system.
     fn validate_permissions(path: &Path) -> Result<()> {
         #[cfg(unix)]
         {
@@ -73,16 +93,16 @@ impl OAuthManager {
             let permissions = metadata.permissions();
             let mode = permissions.mode() & 0o777;
 
-            // Allow only 0600 (rw-------) or 0400 (r--------)
+            // Allow only owner-accessible files.
             if mode != 0o600 && mode != 0o400 {
                 warn!(
-                    "Insecure credentials file permissions: {:o} (should be 0600 or 0400)",
+                    "Insecure permissions on {}: {:o} (expected 0600)",
+                    path.display(),
                     mode
                 );
                 return Err(ProxyError::InvalidCredentials(format!(
-                    "Insecure file permissions: {:o}. Run: chmod 600 {}",
-                    mode,
-                    path.display()
+                    "Insecure file permissions: {:o}. Security policy requires 0600 (rw-------).",
+                    mode
                 )));
             }
         }
@@ -90,55 +110,56 @@ impl OAuthManager {
         Ok(())
     }
 
-    /// Get a valid access token (refreshing if needed using double-checked locking)
+    /// Acquires a valid access token, performing a refresh if necessary.
+    ///
+    /// This method implements a high-performance double-checked locking pattern:
+    /// 1. Optimized check with a shared `RwLock` read-lock.
+    /// 2. If expired, acquires a exclusive `Mutex` to synchronize refresh logic.
+    /// 3. Re-checks expiry inside the mutex to see if another thread already refreshed.
+    /// 4. Executes the refresh and updates both in-memory and on-disk state.
     pub async fn get_token(&self) -> Result<String> {
-        // FIRST CHECK: Fast path with read lock
+        // Fast path: Token is still valid.
         {
             let creds = self.credentials.read().await;
             if !creds.is_expired(self.config.refresh_buffer_seconds) {
-                // Update expiry metric
                 let seconds_remaining =
                     (creds.expiry_date / 1000 - chrono::Utc::now().timestamp()).max(0);
                 crate::metrics::update_oauth_expiry(seconds_remaining);
                 return Ok(creds.access_token.clone());
             }
-        } // Release read lock
+        }
 
-        // Token expired - check if auto-refresh is enabled
         if !self.config.auto_refresh {
-            warn!("Token expired and auto_refresh is disabled");
             return Err(ProxyError::TokenExpired);
         }
 
-        // Acquire refresh lock (only ONE request enters here)
+        // Potentially slow path: Synchronize access to Google's OAuth2 endpoint.
         let _guard = self.refresh_lock.lock().await;
-        debug!("Acquired refresh lock");
 
-        // SECOND CHECK: Another thread might have refreshed while we waited
+        // Re-verify after gaining the mutex.
         {
             let creds = self.credentials.read().await;
             if !creds.is_expired(self.config.refresh_buffer_seconds) {
-                debug!("Token was refreshed by another request");
+                debug!("Token already refreshed by another concurrent request.");
                 return Ok(creds.access_token.clone());
             }
         }
 
-        // Still expired - we must refresh
-        warn!("Refreshing expired OAuth token");
+        warn!("OAuth access token expired; initiating refresh.");
         match self.refresh_token().await {
             Ok(new_creds) => {
-                // Write new credentials with write lock
+                // Update internal thread-safe state.
                 {
                     let mut creds = self.credentials.write().await;
                     *creds = new_creds.clone();
                 }
 
-                // Persist to disk for future runs
+                // Sync new state to disk so it survives restarts.
                 if let Err(e) = self.save_credentials(&new_creds) {
-                    error!("Failed to save refreshed credentials: {}", e);
+                    error!("Persistence error while saving token: {}", e);
                 }
 
-                info!("Successfully refreshed and saved OAuth token");
+                info!("Successfully updated and persisted OAuth transition.");
                 crate::metrics::record_oauth_refresh(true);
                 Ok(new_creds.access_token.clone())
             }
@@ -149,11 +170,10 @@ impl OAuthManager {
         }
     }
 
-    /// Refresh the OAuth token using refresh_token
+    /// Negotiates a new access token with Google's OAuth2 service.
     async fn refresh_token(&self) -> Result<OAuthCredentials> {
         let creds = self.credentials.read().await;
 
-        // Build refresh request body
         let params = [
             ("client_id", OAUTH_CLIENT_ID),
             ("client_secret", OAUTH_CLIENT_SECRET),
@@ -161,102 +181,96 @@ impl OAuthManager {
             ("grant_type", "refresh_token"),
         ];
 
-        // Call Google OAuth2 token endpoint with retry
         let client = reqwest::Client::new();
         let url = "https://oauth2.googleapis.com/token";
 
-        // Build request logic
         let request_logic = || async {
             let response = client
                 .post(url)
                 .form(&params)
                 .send()
                 .await
-                .map_err(|e| (500, format!("HTTP request failed: {}", e)))?;
+                .map_err(|e| (500, format!("Google OAuth2 network error: {}", e)))?;
 
             let status = response.status();
             if !status.is_success() {
                 let error_text = response
                     .text()
                     .await
-                    .unwrap_or_else(|_| "Unknown error".to_string());
+                    .unwrap_or_else(|_| "Unknown".to_string());
                 return Err((status.as_u16(), error_text));
             }
 
             Ok(response)
         };
 
-        // Execute with retry
+        // Attempt refresh with automated retries.
         let response = crate::utils::retry::with_retry("OAuth Refresh", request_logic)
             .await
             .map_err(|(status, body)| match status {
                 429 => ProxyError::TooManyRequests(body),
-                529 => ProxyError::Overloaded(format!("OAuth service overloaded: {}", body)),
+                529 => ProxyError::Overloaded(format!("Google overloaded: {}", body)),
                 503 | 504 => ProxyError::ServiceUnavailable(body),
                 _ => ProxyError::OAuthRefresh(format!("HTTP {}: {}", status, body)),
             })?;
 
-        // Parse response
         let token_data: serde_json::Value = response
             .json()
             .await
-            .map_err(|e| ProxyError::OAuthRefresh(format!("Failed to parse response: {}", e)))?;
+            .map_err(|e| ProxyError::OAuthRefresh(format!("Malformed JSON response: {}", e)))?;
 
-        // Extract new access token
         let new_access_token = token_data
             .get("access_token")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| ProxyError::OAuthRefresh("No access_token in response".to_string()))?
+            .ok_or_else(|| {
+                ProxyError::OAuthRefresh("Missing access_token in Google response".to_string())
+            })?
             .to_string();
 
-        // Calculate expiry time
         let expires_in = token_data
             .get("expires_in")
             .and_then(|v| v.as_i64())
-            .unwrap_or(3600); // Default to 1 hour
+            .unwrap_or(3600);
 
         let new_expiry = chrono::Utc::now().timestamp_millis() + (expires_in * 1000);
 
-        // Build new credentials (reuse existing refresh_token)
         let new_creds = OAuthCredentials {
             access_token: new_access_token,
             refresh_token: creds.refresh_token.clone(),
             token_type: "Bearer".to_string(),
             expiry_date: new_expiry,
             scope: creds.scope.clone(),
-            id_token: String::new(), // Not provided on refresh
+            id_token: String::new(),
         };
 
-        debug!("Token refreshed, new expiry: {}", new_expiry);
+        debug!("Refreshed token expires in {} seconds", expires_in);
         Ok(new_creds)
     }
 
-    /// Save credentials to disk
+    /// Serializes and writes credentials back to the disk.
     fn save_credentials(&self, creds: &OAuthCredentials) -> Result<()> {
         use std::io::Write;
 
         let path = Path::new(&self.config.credentials_path);
         let json = serde_json::to_string_pretty(creds)
-            .map_err(|e| ProxyError::Internal(format!("Failed to serialize credentials: {}", e)))?;
+            .map_err(|e| ProxyError::Internal(format!("Serialization failure: {}", e)))?;
 
         let mut file = fs::File::create(path).map_err(|e| {
-            ProxyError::Internal(format!("Failed to create credentials file: {}", e))
+            ProxyError::Internal(format!("Failed to truncate/create credentials file: {}", e))
         })?;
 
         file.write_all(json.as_bytes())
-            .map_err(|e| ProxyError::Internal(format!("Failed to write credentials: {}", e)))?;
+            .map_err(|e| ProxyError::Internal(format!("Disk write failure: {}", e)))?;
 
-        // Ensure secure permissions
         #[cfg(unix)]
         {
             fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
         }
 
-        debug!("Saved refreshed credentials to disk");
         Ok(())
     }
 
-    /// Get token expiry information
+    /// Provides safe access to public token metadata (expiry time).
     pub async fn token_info(&self) -> (i64, bool) {
         let creds = self.credentials.read().await;
         let expires_in = creds.expires_in_seconds();
