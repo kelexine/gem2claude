@@ -274,9 +274,9 @@ mod tests {
 
         let sanitized = sanitize_schema(schema);
 
-        assert!(!sanitized.get("$schema").is_some());
-        assert!(!sanitized.get("exclusiveMinimum").is_some());
-        assert!(!sanitized.get("$ref").is_some());
+        assert!(sanitized.get("$schema").is_none());
+        assert!(sanitized.get("exclusiveMinimum").is_none());
+        assert!(sanitized.get("$ref").is_none());
         assert!(sanitized.get("type").is_some());
         assert!(sanitized.get("properties").is_some());
     }
@@ -296,7 +296,7 @@ mod tests {
         let sanitized = sanitize_schema(schema);
         let nested = sanitized.get("properties").unwrap().get("nested").unwrap();
 
-        assert!(!nested.get("$schema").is_some());
+        assert!(nested.get("$schema").is_none());
         assert!(nested.get("type").is_some());
     }
 }

@@ -197,7 +197,7 @@ fn map_stop_reason(_finish_reason: Option<&str>) -> Option<String> {
 mod tests {
     use super::*;
     use crate::models::gemini::{
-        Candidate, Content, FunctionCall, GenerateContentResponse, ResponseWrapper, UsageMetadata,
+        FunctionCall,
     };
 
     #[test]
