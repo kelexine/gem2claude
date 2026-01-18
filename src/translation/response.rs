@@ -196,9 +196,7 @@ fn map_stop_reason(_finish_reason: Option<&str>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::gemini::{
-        FunctionCall,
-    };
+    use crate::models::gemini::FunctionCall;
 
     #[test]
     fn test_thinking_artifact_stripping() {
