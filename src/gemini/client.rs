@@ -449,7 +449,7 @@ impl GeminiClient {
         };
 
         let wrapped_request = crate::models::gemini::InternalApiRequest {
-            model: "gemini-2.0-flash-exp".to_string(),
+            model: "gemini-2.5-flash-lite".to_string(),
             project: Some(self.project_id.clone()),
             user_prompt_id: Some(format!("health_{}", uuid::Uuid::new_v4().simple())),
             request,
