@@ -15,24 +15,15 @@ static MODEL_MAP: phf::Map<&'static str, &'static str> = phf_map! {
     "claude-sonnet-4.5" => "gemini-3-flash-preview",
     "claude-sonnet-4-5" => "gemini-3-flash-preview",
 
-    "claude-haiku-4-5-20251001" => "gemini-2.5-pro",
-    "claude-haiku-4.5" => "gemini-2.5-pro",
-    "claude-haiku-4-5" => "gemini-2.5-pro",
+    "claude-haiku-4-5-20251001" => "gemini-2.5-flash-lite",
+    "claude-haiku-4.5" => "gemini-2.5-flash-lite",
+    "claude-haiku-4-5" => "gemini-2.5-flash-lite",
 
     // Claude 4/4.1 Generation (May 2025 - Aug 2025)
     "claude-opus-4-1-20250805" => "gemini-2.5-pro",
     "claude-opus-4.1" => "gemini-2.5-pro",
     "claude-opus-4-1" => "gemini-2.5-pro",
 
-    "claude-opus-4-20250514" => "gemini-2.5-pro",
-    "claude-opus-4" => "gemini-2.5-pro",
-
-    "claude-sonnet-4-20250514" => "gemini-2.5-flash",
-    "claude-sonnet-4" => "gemini-2.5-flash",
-
-    // Claude 3.7 Generation (Feb 2025 - Mar 2025)
-    "claude-3-7-sonnet-20250224" => "gemini-2.5-flash-lite",
-    "claude-3.7-sonnet" => "gemini-2.5-flash-lite",
 
 };
 /// Map Claude model name to Gemini model name
