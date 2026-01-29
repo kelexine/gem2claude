@@ -13,6 +13,7 @@
 //! Author: kelexine (<https://github.com/kelexine>)
 
 mod handlers;
+mod message_handlers;
 mod middleware;
 mod routes;
 

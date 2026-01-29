@@ -11,17 +11,7 @@ use crate::error::Result;
 use crate::models::gemini::GenerateContentResponse;
 use crate::models::streaming::*;
 
-/// Internal identifier for the type of content block being processed.
-#[derive(Debug, PartialEq, Clone, Copy)]
-enum BlockType {
-    /// Standard assistant response text.
-    Text,
-    /// Internal reasoning or "thinking" content.
-    Thinking,
-    /// A call to an external tool/function.
-    #[allow(dead_code)]
-    ToolUse,
-}
+use crate::translation::stream_processors::{process_text_segment, BlockType};
 
 /// Stateful translator for a single streaming request.
 ///
@@ -79,101 +69,8 @@ impl StreamTranslator {
     }
 
     /// Segments a text chunk into logical parts by detecting `<think>` and `</think>` tags.
-    ///
-    /// This method is designed to be robust against "fragmented tags" where an opening
-    /// or closing tag is split across multiple SSE chunks (e.g., chunk 1 ends in `<thi`
-    /// and chunk 2 starts with `nk>`).
-    ///
-    /// # Returns
-    ///
-    /// A vector of (BlockType, String) tuples representing the decoded segments.
     fn process_text_chunk(&mut self, text: &str) -> Vec<(BlockType, String)> {
-        let mut segments = Vec::new();
-        // Prepend any left-over fragments from the previous chunk.
-        let mut full_text = self.thinking_buffer.clone() + text;
-        self.thinking_buffer.clear();
-
-        // Security check: ensure the thinking buffer doesn't grow indefinitely.
-        if full_text.len() > 10 * 1024 * 1024 {
-            tracing::error!(
-                "Thinking buffer safety limit (10MB) exceeded; forcibly resetting state."
-            );
-            let cleaned = full_text.replace("<think>", "").replace("</think>", "");
-            segments.push((BlockType::Text, cleaned));
-            self.in_thinking = false;
-            return segments;
-        }
-
-        loop {
-            if self.in_thinking {
-                match full_text.find("</think>") {
-                    Some(idx) => {
-                        let content = full_text[..idx].to_string();
-                        if !content.is_empty() {
-                            segments.push((BlockType::Thinking, content));
-                        }
-                        self.in_thinking = false;
-                        full_text = full_text[idx + 8..].to_string();
-                    }
-                    None => {
-                        // Check for a partial closing tag at the very end of the string.
-                        if let Some(partial_idx) = Self::find_partial_tag(&full_text, "</think>") {
-                            let content = full_text[..partial_idx].to_string();
-                            if !content.is_empty() {
-                                segments.push((BlockType::Thinking, content));
-                            }
-                            self.thinking_buffer = full_text[partial_idx..].to_string();
-                            break;
-                        } else {
-                            if !full_text.is_empty() {
-                                segments.push((BlockType::Thinking, full_text));
-                            }
-                            break;
-                        }
-                    }
-                }
-            } else {
-                match full_text.find("<think>") {
-                    Some(idx) => {
-                        let content = full_text[..idx].to_string();
-                        if !content.is_empty() {
-                            segments.push((BlockType::Text, content));
-                        }
-                        self.in_thinking = true;
-                        full_text = full_text[idx + 7..].to_string();
-                    }
-                    None => {
-                        // Check for a partial opening tag at the end.
-                        if let Some(partial_idx) = Self::find_partial_tag(&full_text, "<think>") {
-                            let content = full_text[..partial_idx].to_string();
-                            if !content.is_empty() {
-                                segments.push((BlockType::Text, content));
-                            }
-                            self.thinking_buffer = full_text[partial_idx..].to_string();
-                            break;
-                        } else {
-                            if !full_text.is_empty() {
-                                segments.push((BlockType::Text, full_text));
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        segments
-    }
-
-    /// Internal helper to detect if a string ends with the beginning of a specific tag.
-    fn find_partial_tag(text: &str, tag: &str) -> Option<usize> {
-        for i in 1..tag.len() {
-            let prefix = &tag[..i];
-            if text.ends_with(prefix) {
-                return Some(text.len() - prefix.len());
-            }
-        }
-        None
+        process_text_segment(text, &mut self.in_thinking, &mut self.thinking_buffer)
     }
 
     /// Primary entry point for translating a Gemini API chunk into Anthropic events.
@@ -466,12 +363,13 @@ mod tests {
 
     #[test]
     fn test_partial_tag_detection() {
+        use crate::translation::stream_processors::find_partial_tag;
         assert_eq!(
-            StreamTranslator::find_partial_tag("hello<", "<think>"),
+            find_partial_tag("hello<", "<think>"),
             Some(5)
         );
         assert_eq!(
-            StreamTranslator::find_partial_tag("hello<think", "<think>"),
+            find_partial_tag("hello<think", "<think>"),
             Some(5)
         );
     }

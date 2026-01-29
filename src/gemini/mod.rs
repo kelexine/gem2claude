@@ -3,7 +3,9 @@
 
 pub mod availability;
 pub mod cache_models;
-mod client;
+pub mod client;
+pub mod operations;
+pub mod resolution;
 pub mod streaming;
 
 pub use availability::ModelAvailabilityService;

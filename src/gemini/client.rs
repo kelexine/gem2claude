@@ -9,10 +9,11 @@
 
 // Author: kelexine (https://github.com/kelexine)
 
-use super::{ProjectResolutionRequest, ProjectResolutionResponse};
 use crate::config::GeminiConfig;
 use crate::error::{ProxyError, Result};
 use crate::oauth::OAuthManager;
+use crate::gemini::resolution::resolve_project_id;
+use crate::gemini::operations::{check_connectivity, create_cache};
 use reqwest::Client;
 use std::time::Duration;
 use tracing::{debug, error, info};
@@ -53,8 +54,6 @@ impl GeminiClient {
     ///
     /// Returns `ProxyError::ProjectResolution` if the project ID cannot be determined.
     pub async fn new(config: &GeminiConfig, oauth_manager: OAuthManager) -> Result<Self> {
-        // Configure HTTP client for optimal streaming performance
-        // We use a custom pool and keep-alive to minimize handshake overhead
         let http_client = Client::builder()
             .timeout(Duration::from_secs(config.timeout_seconds))
             .connect_timeout(Duration::from_secs(10))
@@ -68,9 +67,8 @@ impl GeminiClient {
 
         debug!("Created HTTP client with connection pooling and keep-alive");
 
-        // Resolve project ID via loadCodeAssist (required for subsequent API calls)
         let project_id =
-            Self::resolve_project_id(&http_client, &config.api_base_url, &oauth_manager).await?;
+            resolve_project_id(&http_client, &config.api_base_url, &oauth_manager).await?;
 
         info!("Successfully resolved project ID: {}", project_id);
 
@@ -85,96 +83,7 @@ impl GeminiClient {
         })
     }
 
-    /// Resolve Cloud AI Companion project ID via loadCodeAssist
-    ///
-    /// This is a critical bootstrap step. Google's internal APIs often require
-    /// an explicit project ID in the payload, even when using user-level credentials.
-    async fn resolve_project_id(
-        client: &Client,
-        base_url: &str,
-        oauth_manager: &OAuthManager,
-    ) -> Result<String> {
-        let url = format!("{}:loadCodeAssist", base_url);
-        let request_payload = ProjectResolutionRequest::default();
 
-        debug!("Resolving project ID via {}", url);
-
-        // Clone for retry closure
-        let client = client.clone();
-        let url = url.clone();
-        let request_payload = request_payload.clone();
-        let oauth_manager = oauth_manager.clone();
-
-        crate::utils::retry::with_retry(
-            "Project Resolution",
-            || async {
-                let access_token = oauth_manager.get_token().await
-                    .map_err(|e| (500, format!("OAuth error: {}", e)))?;
-
-                let response = client
-                    .post(&url)
-                    .header("Authorization", format!("Bearer {}", access_token))
-                    .header("Content-Type", "application/json")
-                    .json(&request_payload)
-                    .send()
-                    .await
-                    .map_err(|e| (500, format!("HTTP error: {}", e)))?;
-
-                let status = response.status();
-                let response_text = response.text().await.unwrap_or_default();
-                if !status.is_success() {
-                    let error_msg = Self::extract_error_message(&response_text)
-                        .unwrap_or_else(|| response_text.clone());
-                    return Err((status.as_u16(), error_msg));
-                }
-
-                let project_response: ProjectResolutionResponse = serde_json::from_str(&response_text)
-                    .map_err(|e| (500, format!("Invalid response: {}", e)))?;
-
-                match project_response.cloudaicompanion_project {
-                    Some(project_id) => Ok(project_id),
-                    None => {
-                        let error_msg = Self::extract_error_message(&response_text)
-                            .unwrap_or_else(|| {
-                                "Account check failed: No Gemini Pro subscription detected.\n\
-                                 Please ensure you are using an account with 'Google One AI Premium' or 'Gemini Advanced'."
-                                 .to_string()
-                            });
-                        Err((403, error_msg))
-                    }
-                }
-            }
-        )
-        .await
-        .map_err(|(status, body)| match status {
-            403 => ProxyError::ProjectResolution(body),
-            429 => ProxyError::TooManyRequests(body),
-            529 => ProxyError::Overloaded(format!("Gemini API overloaded: {}", body)),
-            503 | 504 => ProxyError::ServiceUnavailable(format!("Upstream unavailable: {}", body)),
-            _ => ProxyError::ProjectResolution(format!("HTTP {}: {}", status, body)),
-        })
-    }
-
-    /// Extracts a user-friendly error message from a Google API JSON response.
-    fn extract_error_message(response_text: &str) -> Option<String> {
-        #[derive(serde::Deserialize)]
-        struct ErrorResponse {
-            error: Option<ErrorDetail>,
-        }
-
-        #[derive(serde::Deserialize)]
-        struct ErrorDetail {
-            message: Option<String>,
-            status: Option<String>,
-        }
-
-        if let Ok(error_resp) = serde_json::from_str::<ErrorResponse>(response_text) {
-            if let Some(error) = error_resp.error {
-                return error.message.or(error.status);
-            }
-        }
-        None
-    }
 
     /// Returns the resolved Google Cloud Project ID.
     pub fn project_id(&self) -> &str {
@@ -344,143 +253,31 @@ impl GeminiClient {
         .await
     }
 
-    /// Creates a persistent cached content entry in the Gemini API.
-    ///
-    /// Context caching is used to handle large system instructions or repeated prefixes,
-    /// significantly reducing latency and cost for subsequent calls.
     pub async fn create_cache(
         &self,
         model: &str,
         system_instruction: Option<crate::models::gemini::SystemInstruction>,
         contents: Vec<crate::models::gemini::Content>,
     ) -> Result<String> {
-        use crate::gemini::cache_models::{CachedContentResponse, CreateCachedContentRequest};
-
-        let url = format!(
-            "{}/cachedContents",
-            self.config.api_base_url.trim_end_matches("/v1internal")
-        );
-
-        let request = CreateCachedContentRequest {
-            model: model.to_string(),
+        create_cache(
+            &self.http_client,
+            &self.config.api_base_url,
+            &self.oauth_manager,
+            model,
             system_instruction,
             contents,
-            ttl: Some("300s".to_string()), // Default 5 minute TTL
-        };
-
-        debug!("Creating cache for model: {}", model);
-
-        let http_client = self.http_client.clone();
-        let url = url.clone();
-        let request = request.clone();
-        let oauth_manager = self.oauth_manager.clone();
-
-        crate::utils::retry::with_retry("Create Cache", || async {
-            let access_token = oauth_manager
-                .get_token()
-                .await
-                .map_err(|e| (500, format!("OAuth error: {}", e)))?;
-
-            let response = http_client
-                .post(&url)
-                .header("Authorization", format!("Bearer {}", access_token))
-                .header("Content-Type", "application/json")
-                .json(&request)
-                .send()
-                .await
-                .map_err(|e| (500, format!("HTTP error: {}", e)))?;
-
-            let status = response.status();
-            if !status.is_success() {
-                let error_text = response.text().await.unwrap_or_default();
-                error!("Cache creation failed: HTTP {} - {}", status, error_text);
-                return Err((status.as_u16(), error_text));
-            }
-
-            let cache_response: CachedContentResponse = response
-                .json()
-                .await
-                .map_err(|e| (500, format!("Invalid response: {}", e)))?;
-
-            Ok(cache_response)
-        })
+        )
         .await
-        .map_err(|(status, body)| match status {
-            429 => ProxyError::TooManyRequests(body),
-            503 | 504 => ProxyError::ServiceUnavailable(format!("Upstream unavailable: {}", body)),
-            _ => ProxyError::GeminiApi(format!("HTTP {}: {}", status, body)),
-        })
-        .map(|res| {
-            debug!("Cache created: {}", res.name);
-            res.name
-        })
     }
 
-    /// Verifies the basic connectivity and authentication status of the Gemini API.
-    ///
-    /// Sends a minimal placeholder request to confirm that the project resolution,
-    /// OAuth token acquisition, and upstream response cycle are functional.
     pub async fn check_connectivity(&self) -> Result<Duration> {
-        let url = format!("{}:generateContent", self.config.api_base_url);
-        let start = std::time::Instant::now();
-
-        let request = crate::models::gemini::GenerateContentRequest {
-            contents: vec![crate::models::gemini::Content {
-                role: "user".to_string(),
-                parts: vec![crate::models::gemini::Part::Text {
-                    text: "hi".to_string(),
-                    thought: None,
-                    thought_signature: None,
-                }],
-            }],
-            system_instruction: None,
-            generation_config: Some(crate::models::gemini::GenerationConfig {
-                max_output_tokens: Some(1),
-                temperature: None,
-                top_p: None,
-                top_k: None,
-                stop_sequences: None,
-                candidate_count: None,
-                thinking_config: None,
-            }),
-            tools: None,
-            tool_config: None,
-            cached_content: None,
-        };
-
-        let wrapped_request = crate::models::gemini::InternalApiRequest {
-            model: "gemini-2.5-flash-lite".to_string(),
-            project: Some(self.project_id.clone()),
-            user_prompt_id: Some(format!("health_{}", uuid::Uuid::new_v4().simple())),
-            request,
-        };
-
-        let access_token = self.oauth_manager.get_token().await?;
-
-        let response = self
-            .http_client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", access_token))
-            .header("Content-Type", "application/json")
-            .json(&wrapped_request)
-            .timeout(Duration::from_secs(5))
-            .send()
-            .await
-            .map_err(|e| ProxyError::GeminiApi(format!("Health check request failed: {}", e)))?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(ProxyError::GeminiApi(format!(
-                "API check failed: {}",
-                error_text
-            )));
-        }
-
-        let latency = start.elapsed();
-        debug!("API connectivity check passed in {:?}", latency);
-
-        Ok(latency)
+        check_connectivity(
+            &self.http_client,
+            &self.config.api_base_url,
+            &self.oauth_manager,
+            &self.project_id,
+        )
+        .await
     }
 }
 
@@ -488,7 +285,7 @@ impl GeminiClient {
 mod tests {
     #[test]
     fn test_project_resolution_request_format() {
-        use super::ProjectResolutionRequest;
+        use crate::gemini::ProjectResolutionRequest;
 
         let request = ProjectResolutionRequest::default();
         let json = serde_json::to_value(&request).unwrap();

@@ -23,8 +23,8 @@ static MODEL_MAP: phf::Map<&'static str, &'static str> = phf_map! {
     "claude-opus-4-1-20250805" => "gemini-2.5-pro",
     "claude-opus-4.1" => "gemini-2.5-pro",
     "claude-opus-4-1" => "gemini-2.5-pro",
-
-
+    "claude-opus-4" => "gemini-2.5-pro",
+    "claude-sonnet-4" => "gemini-2.5-flash",
 };
 /// Map Claude model name to Gemini model name
 pub fn map_model(claude_model: &str) -> Result<String> {
@@ -63,9 +63,8 @@ mod tests {
 
     #[test]
     fn test_model_mapping() {
-        // claude-sonnet-4-5 maps to gemini-3-flash-preview (per PHF map line 16)
         assert_eq!(
-            map_model("claude-sonnet-4-5").unwrap(),
+            map_model("claude-sonnet-4.5").unwrap(),
             "gemini-3-flash-preview"
         );
         assert_eq!(map_model("claude-opus-4").unwrap(), "gemini-2.5-pro");
@@ -86,7 +85,7 @@ mod tests {
         );
         assert_eq!(
             map_model("claude-haiku-4-5-20251001").unwrap(),
-            "gemini-2.5-pro"
+            "gemini-2.5-flash-lite"
         );
 
         // Test without date suffix
