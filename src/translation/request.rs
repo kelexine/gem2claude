@@ -37,7 +37,7 @@ pub async fn translate_request(
         // Force highest thinking level when Ultrathink is present
         anthropic_req.thinking = Some(crate::models::anthropic::ThinkingConfig {
             type_: "enabled".to_string(),
-            budget_tokens: 30_000,
+            budget_tokens: 24_576,
         });
     }
 
@@ -79,8 +79,8 @@ pub async fn translate_request(
         // Gemini 3.x models use thinking Level enum with remapped budgets
         if gemini_model.contains("gemini-3") {
             let level = match thinking.budget_tokens {
-                0..=15_000 => "LOW",
-                15_001..=20_000 => "MEDIUM",
+                0..=5_000 => "LOW",
+                5_001..=10_000 => "MEDIUM",
                 _ => "HIGH",
             };
             Some(GeminiThinkingConfig {
@@ -91,9 +91,9 @@ pub async fn translate_request(
         } else {
             // Gemini 2.5 models use thinkingBudget (token count) with remapped values
             let remapped_budget = match thinking.budget_tokens {
-                0..=15_000 => 15_000,
-                15_001..=20_000 => 20_000,
-                _ => 30_000,
+                0..=5_000 => 5_000,
+                5_001..=10_000 => 10_000,
+                _ => 24_576,
             };
             Some(GeminiThinkingConfig {
                 include_thoughts: Some(true),
