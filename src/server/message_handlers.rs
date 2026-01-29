@@ -178,7 +178,6 @@ async fn stream_messages_handler(
                                         Ok(events) => {
                                             for event in events.iter() {
                                                 yield Ok::<String, std::convert::Infallible>(event.to_sse());
-                                                yield Ok(": keepalive\n\n".to_string());
                                             }
                                         }
                                         Err(e) => {
