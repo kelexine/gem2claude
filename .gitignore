@@ -31,7 +31,7 @@ oauth_creds.json
 *.deb
 *.rpm
 *.tar.gz
-gemini-cli-0.23.0/*
-gemini-cli-0.23.0/
 claude_code_api_intel.md
 architecture.md
+
+gemini-cli-0.26.0
