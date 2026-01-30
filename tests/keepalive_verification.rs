@@ -1,10 +1,4 @@
-use axum::{
-    body::Body,
-    extract::State,
-    response::IntoResponse,
-    routing::post,
-    Router,
-};
+use axum::{body::Body, extract::State, response::IntoResponse, routing::post, Router};
 use futures::StreamExt;
 use gem2claude::{
     config::{AppConfig, GeminiConfig, OAuthConfig},
@@ -12,19 +6,18 @@ use gem2claude::{
     oauth::OAuthManager,
     server::create_router,
 };
+use http_body_util::BodyExt;
 use std::os::unix::fs::PermissionsExt;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{net::TcpListener, sync::oneshot};
-use tower::util::ServiceExt; // for oneshot
-use http_body_util::BodyExt; // for collect
+use tower::util::ServiceExt; // for oneshot // for collect
 
 #[tokio::test]
 async fn test_sse_keepalive_ping() {
     // 1. Setup Mock Backend (Fake Gemini API)
     let (tx, rx) = oneshot::channel();
     let mock_server = tokio::spawn(async move {
-        let app = Router::new()
-            .route("/*path", axum::routing::any(mock_dispatcher));
+        let app = Router::new().route("/*path", axum::routing::any(mock_dispatcher));
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -39,7 +32,7 @@ async fn test_sse_keepalive_ping() {
     // 2. Setup Configuration
     let mut config = AppConfig::default();
     config.gemini.api_base_url = mock_url.clone();
-    
+
     // Create dummy credentials file
     let temp_dir = tempfile::tempdir().unwrap();
     let creds_path = temp_dir.path().join("creds.json");
@@ -56,7 +49,9 @@ async fn test_sse_keepalive_ping() {
     config.oauth.credentials_path = creds_path.to_string_lossy().to_string();
 
     // 3. Initialize App Components
-    let oauth_manager = OAuthManager::new(&config.oauth).await.expect("Failed to init OAuth");
+    let oauth_manager = OAuthManager::new(&config.oauth)
+        .await
+        .expect("Failed to init OAuth");
     let gemini_client = GeminiClient::new(&config.gemini, oauth_manager.clone())
         .await
         .expect("Failed to init Gemini Client");
@@ -84,7 +79,7 @@ async fn test_sse_keepalive_ping() {
 
     // 6. Consume Stream and Verify Ping
     let mut body_stream = response.into_body().into_data_stream();
-    
+
     let mut received_ping = false;
     let mut received_data = false;
     let start = std::time::Instant::now();
@@ -103,8 +98,11 @@ async fn test_sse_keepalive_ping() {
     }
 
     // Assert that we waited at least 15 seconds (due to delay)
-    assert!(start.elapsed() >= Duration::from_secs(15), "Stream finished too fast, delay didn't work");
-    
+    assert!(
+        start.elapsed() >= Duration::from_secs(15),
+        "Stream finished too fast, delay didn't work"
+    );
+
     // Assert we got the ping
     assert!(received_ping, "Did NOT receive expected keep-alive ping!");
     assert!(received_data, "Did NOT receive content data!");

@@ -2,9 +2,9 @@
 // Author: kelexine (https://github.com/kelexine)
 
 use crate::error::{ProxyError, Result};
-use crate::models::gemini::{GenerateContentRequest, Part, GenerationConfig, InternalApiRequest};
-use crate::oauth::OAuthManager;
 use crate::gemini::cache_models::{CachedContentResponse, CreateCachedContentRequest};
+use crate::models::gemini::{GenerateContentRequest, GenerationConfig, InternalApiRequest, Part};
+use crate::oauth::OAuthManager;
 use reqwest::Client;
 use std::time::{Duration, Instant};
 use tracing::{debug, error};
@@ -129,7 +129,10 @@ pub async fn check_connectivity(
     let status = response.status();
     if !status.is_success() {
         let error_text = response.text().await.unwrap_or_default();
-        return Err(ProxyError::GeminiApi(format!("API check failed: {}", error_text)));
+        return Err(ProxyError::GeminiApi(format!(
+            "API check failed: {}",
+            error_text
+        )));
     }
 
     Ok(start.elapsed())

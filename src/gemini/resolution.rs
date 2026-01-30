@@ -1,10 +1,10 @@
 // Project resolution logic for Gemini Cloud Code
 // Author: kelexine (https://github.com/kelexine)
 
+use super::{ProjectResolutionRequest, ProjectResolutionResponse};
 use crate::error::{ProxyError, Result};
 use crate::oauth::OAuthManager;
 use reqwest::Client;
-use super::{ProjectResolutionRequest, ProjectResolutionResponse};
 use tracing::debug;
 
 /// Resolve Cloud AI Companion project ID via loadCodeAssist

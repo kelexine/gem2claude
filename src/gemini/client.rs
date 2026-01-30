@@ -11,9 +11,9 @@
 
 use crate::config::GeminiConfig;
 use crate::error::{ProxyError, Result};
-use crate::oauth::OAuthManager;
-use crate::gemini::resolution::resolve_project_id;
 use crate::gemini::operations::{check_connectivity, create_cache};
+use crate::gemini::resolution::resolve_project_id;
+use crate::oauth::OAuthManager;
 use reqwest::Client;
 use std::time::Duration;
 use tracing::{debug, error, info};
@@ -82,8 +82,6 @@ impl GeminiClient {
             availability_service,
         })
     }
-
-
 
     /// Returns the resolved Google Cloud Project ID.
     pub fn project_id(&self) -> &str {

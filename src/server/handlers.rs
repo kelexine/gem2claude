@@ -6,13 +6,9 @@
 //!
 //! Author: kelexine (<https://github.com/kelexine>)
 
-use super::routes::AppState;
-use axum::{
-    extract::State,
-    response::IntoResponse,
-    Json,
-};
 pub use super::message_handlers::messages_handler;
+use super::routes::AppState;
+use axum::{extract::State, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -145,8 +141,6 @@ pub async fn metrics_handler() -> impl IntoResponse {
         metrics,
     )
 }
-
-
 
 /// Sink handler for Claude Code telemetry and event logging.
 ///

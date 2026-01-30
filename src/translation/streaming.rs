@@ -364,13 +364,7 @@ mod tests {
     #[test]
     fn test_partial_tag_detection() {
         use crate::translation::stream_processors::find_partial_tag;
-        assert_eq!(
-            find_partial_tag("hello<", "<think>"),
-            Some(5)
-        );
-        assert_eq!(
-            find_partial_tag("hello<think", "<think>"),
-            Some(5)
-        );
+        assert_eq!(find_partial_tag("hello<", "<think>"), Some(5));
+        assert_eq!(find_partial_tag("hello<think", "<think>"), Some(5));
     }
 }

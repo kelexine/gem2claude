@@ -14,12 +14,14 @@ fn test_all_core_models() {
         map_model("claude-sonnet-4-5").unwrap(),
         "gemini-3-flash-preview"
     );
-    assert_eq!(map_model("claude-haiku-4-5").unwrap(), "gemini-2.5-flash-lite");
+    assert_eq!(
+        map_model("claude-haiku-4-5").unwrap(),
+        "gemini-2.5-flash-lite"
+    );
 
     // Claude 4/4.1 models (per PHF map)
     assert_eq!(map_model("claude-opus-4").unwrap(), "gemini-2.5-pro");
     assert_eq!(map_model("claude-sonnet-4").unwrap(), "gemini-2.5-flash");
-
 }
 
 #[test]
@@ -59,7 +61,10 @@ fn test_dot_notation_models() {
         map_model("claude-sonnet-4.5").unwrap(),
         "gemini-3-flash-preview"
     );
-    assert_eq!(map_model("claude-haiku-4.5").unwrap(), "gemini-2.5-flash-lite");
+    assert_eq!(
+        map_model("claude-haiku-4.5").unwrap(),
+        "gemini-2.5-flash-lite"
+    );
 }
 
 #[test]

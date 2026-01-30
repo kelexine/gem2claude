@@ -2,14 +2,14 @@
 // Author: kelexine (https://github.com/kelexine)
 
 use super::routes::AppState;
+use crate::error::ProxyError;
+use crate::models::anthropic::MessagesRequest;
 use axum::{
     extract::State,
     response::{IntoResponse, Response},
     Json,
 };
-use tracing::{debug, warn, error};
-use crate::error::ProxyError;
-use crate::models::anthropic::MessagesRequest;
+use tracing::{debug, error, warn};
 
 /// Unified handler for the Anthropic Messages API compatible endpoint (`/v1/messages`).
 pub async fn messages_handler(
@@ -80,9 +80,16 @@ async fn non_stream_messages_handler(
         gemini_req.cached_content = Some(cache_name);
     }
 
-    debug!("Dispatching unary request to Gemini API (Model: {})", gemini_model);
+    debug!(
+        "Dispatching unary request to Gemini API (Model: {})",
+        gemini_model
+    );
 
-    let gemini_resp = match state.gemini_client.generate_content(gemini_req, &gemini_model).await {
+    let gemini_resp = match state
+        .gemini_client
+        .generate_content(gemini_req, &gemini_model)
+        .await
+    {
         Ok(resp) => resp,
         Err(e) => {
             error!("Upstream Gemini API call failure: {}", e);
