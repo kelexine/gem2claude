@@ -1,6 +1,6 @@
 [package]
 name = "gem2claude"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 authors = ["kelexine <https://github.com/kelexine>"]
 description = "OAuth-based Gemini API to Claude Code Compatible Proxy"
@@ -97,3 +97,7 @@ strip = true
 [[bin]]
 name = "gem2claude"
 path = "src/main.rs"
+
+[[bench]]
+name = "streaming_bench"
+harness = false

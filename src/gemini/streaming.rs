@@ -103,47 +103,46 @@ fn parse_sse_stream<S>(byte_stream: S) -> impl Stream<Item = Result<GenerateCont
 where
     S: Stream<Item = reqwest::Result<bytes::Bytes>> + Send + 'static,
 {
+    use bytes::{Buf, BytesMut};
     use futures::StreamExt;
 
     async_stream::stream! {
-        let mut buffer = String::new();
+        let mut buffer = BytesMut::with_capacity(8192);
 
         futures::pin_mut!(byte_stream);
 
         while let Some(chunk_result) = byte_stream.next().await {
             match chunk_result {
                 Ok(chunk) => {
-                    let chunk_str = String::from_utf8_lossy(&chunk);
                     debug!("Received chunk: {} bytes", chunk.len());
-                    buffer.push_str(&chunk_str);
+                    buffer.extend_from_slice(&chunk);
 
                     // SSE event boundary scanning.
-                    // We look for double newlines which indicate the end of an event block.
-                    let mut events_in_this_chunk = 0;
                     loop {
-                        let lf_pos = buffer.find("\n\n");
-                        let crlf_pos = buffer.find("\r\n\r\n");
+                        // Scan for double newlines directly in bytes
+                        let lf_pos = buffer.windows(2).position(|w| w == b"\n\n");
+                        let crlf_pos = buffer.windows(4).position(|w| w == b"\r\n\r\n");
 
-                        // Pick the first delimiter found to maintain sequence order.
                         let (event_end, delim_len) = match (lf_pos, crlf_pos) {
                             (Some(lf), Some(crlf)) => {
                                 if lf <= crlf { (lf, 2) } else { (crlf, 4) }
                             }
                             (Some(lf), None) => (lf, 2),
                             (None, Some(crlf)) => (crlf, 4),
-                            (None, None) => break, // Fragmented event; wait for more data.
+                            (None, None) => break,
                         };
 
-                        let event_data = buffer[..event_end].to_string();
-                        buffer = buffer[event_end + delim_len..].to_string();
+                        // Extract the event bytes (cheap copy/split)
+                        let event_bytes = buffer.split_to(event_end);
+                        // Advance past the delimiter
+                        buffer.advance(delim_len);
 
-                        if let Some(response) = parse_sse_event(&event_data) {
-                            events_in_this_chunk += 1;
+                        // Only convert to UTF-8 for the complete event
+                        let event_str = String::from_utf8_lossy(&event_bytes);
+
+                        if let Some(response) = parse_sse_event(&event_str) {
                             yield Ok(response);
                         }
-                    }
-                    if events_in_this_chunk > 0 {
-                        debug!("Buffered and sent {} responses", events_in_this_chunk);
                     }
                 }
                 Err(e) => {
@@ -154,11 +153,14 @@ where
             }
         }
 
-        // Final buffer flush for streams that might not end with a clean delimiter.
-        if !buffer.trim().is_empty() {
-            if let Some(response) = parse_sse_event(&buffer) {
-                yield Ok(response);
-            }
+        // Final buffer flush
+        if !buffer.is_empty() {
+             let event_str = String::from_utf8_lossy(&buffer);
+             if !event_str.trim().is_empty() {
+                if let Some(response) = parse_sse_event(&event_str) {
+                    yield Ok(response);
+                }
+             }
         }
 
         debug!("Gemini SSE stream closed");

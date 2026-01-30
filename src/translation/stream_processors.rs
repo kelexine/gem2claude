@@ -20,73 +20,107 @@ pub fn process_text_segment(
     thinking_buffer: &mut String,
 ) -> Vec<(BlockType, String)> {
     let mut segments = Vec::new();
-    let mut full_text = thinking_buffer.clone() + text;
-    thinking_buffer.clear();
 
-    // Security check: ensure the thinking buffer doesn't grow indefinitely.
-    if full_text.len() > 10 * 1024 * 1024 {
-        tracing::error!("Thinking buffer safety limit (10MB) exceeded.");
-        let cleaned = full_text.replace("<think>", "").replace("</think>", "");
-        segments.push((BlockType::Text, cleaned));
-        *in_thinking = false;
+    // Fast path: if no tags involved and not in thinking mode, just return text
+    if !*in_thinking && !text.contains("<think") {
+        if !text.is_empty() {
+            segments.push((BlockType::Text, text.to_string()));
+        }
         return segments;
     }
 
-    loop {
+    let mut current_pos = 0;
+    let len = text.len();
+
+    // If we have a buffer from previous chunk, we need to handle it first
+    // This is the only place we might need concatenation if the tag was split
+    if !thinking_buffer.is_empty() {
+        let combined = thinking_buffer.clone() + text;
+        thinking_buffer.clear();
+
+        // Safety check
+        if combined.len() > 10 * 1024 * 1024 {
+            tracing::error!("Thinking buffer safety limit (10MB) exceeded.");
+            let cleaned = combined.replace("<think>", "").replace("</think>", "");
+            segments.push((BlockType::Text, cleaned));
+            *in_thinking = false;
+            return segments;
+        }
+
+        // Recursive call with cleared buffer to handle the boundary condition
+        // This is rare (only happens on split tags), so the recursion overhead is negligible across the stream
+        return process_text_segment(&combined, in_thinking, thinking_buffer);
+    }
+
+    while current_pos < len {
         if *in_thinking {
-            match full_text.find("</think>") {
-                Some(idx) => {
-                    let content = full_text[..idx].to_string();
+            match text[current_pos..].find("</think>") {
+                Some(offset) => {
+                    let end_tag_start = current_pos + offset;
+                    let content = &text[current_pos..end_tag_start];
+
                     if !content.is_empty() {
-                        segments.push((BlockType::Thinking, content));
+                        segments.push((BlockType::Thinking, content.to_string()));
                     }
+
                     *in_thinking = false;
-                    full_text = full_text[idx + 8..].to_string();
+                    current_pos = end_tag_start + 8; // skip </think>
                 }
                 None => {
-                    if let Some(partial_idx) = find_partial_tag(&full_text, "</think>") {
-                        let content = full_text[..partial_idx].to_string();
+                    // check for partial tag at end
+                    if let Some(partial_start) = find_partial_tag(&text[current_pos..], "</think>")
+                    {
+                        let content = &text[current_pos..current_pos + partial_start];
                         if !content.is_empty() {
-                            segments.push((BlockType::Thinking, content));
+                            segments.push((BlockType::Thinking, content.to_string()));
                         }
-                        *thinking_buffer = full_text[partial_idx..].to_string();
-                        break;
+                        thinking_buffer.push_str(&text[current_pos + partial_start..]);
+                        current_pos = len; // Done with this chunk
                     } else {
-                        if !full_text.is_empty() {
-                            segments.push((BlockType::Thinking, full_text));
+                        // All remaining is thinking
+                        let content = &text[current_pos..];
+                        if !content.is_empty() {
+                            segments.push((BlockType::Thinking, content.to_string()));
                         }
-                        break;
+                        current_pos = len;
                     }
                 }
             }
         } else {
-            match full_text.find("<think>") {
-                Some(idx) => {
-                    let content = full_text[..idx].to_string();
+            match text[current_pos..].find("<think>") {
+                Some(offset) => {
+                    let tag_start = current_pos + offset;
+                    let content = &text[current_pos..tag_start];
+
                     if !content.is_empty() {
-                        segments.push((BlockType::Text, content));
+                        segments.push((BlockType::Text, content.to_string()));
                     }
+
                     *in_thinking = true;
-                    full_text = full_text[idx + 7..].to_string();
+                    current_pos = tag_start + 7; // skip <think>
                 }
                 None => {
-                    if let Some(partial_idx) = find_partial_tag(&full_text, "<think>") {
-                        let content = full_text[..partial_idx].to_string();
+                    // check for partial tag at end
+                    if let Some(partial_start) = find_partial_tag(&text[current_pos..], "<think>") {
+                        let content = &text[current_pos..current_pos + partial_start];
                         if !content.is_empty() {
-                            segments.push((BlockType::Text, content));
+                            segments.push((BlockType::Text, content.to_string()));
                         }
-                        *thinking_buffer = full_text[partial_idx..].to_string();
-                        break;
+                        thinking_buffer.push_str(&text[current_pos + partial_start..]);
+                        current_pos = len;
                     } else {
-                        if !full_text.is_empty() {
-                            segments.push((BlockType::Text, full_text));
+                        // All remaining is text
+                        let content = &text[current_pos..];
+                        if !content.is_empty() {
+                            segments.push((BlockType::Text, content.to_string()));
                         }
-                        break;
+                        current_pos = len;
                     }
                 }
             }
         }
     }
+
     segments
 }
 

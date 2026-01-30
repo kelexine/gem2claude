@@ -15,9 +15,9 @@ static MODEL_MAP: phf::Map<&'static str, &'static str> = phf_map! {
     "claude-sonnet-4.5" => "gemini-3-flash-preview",
     "claude-sonnet-4-5" => "gemini-3-flash-preview",
 
-    "claude-haiku-4-5-20251001" => "gemini-2.5-flash-lite",
-    "claude-haiku-4.5" => "gemini-2.5-flash-lite",
-    "claude-haiku-4-5" => "gemini-2.5-flash-lite",
+    "claude-haiku-4-5-20251001" => "gemini-2.5-flash",
+    "claude-haiku-4.5" => "gemini-2.5-flash",
+    "claude-haiku-4-5" => "gemini-2.5-flash",
 
     // Claude 4/4.1 Generation (May 2025 - Aug 2025)
     "claude-opus-4-1-20250805" => "gemini-2.5-pro",
