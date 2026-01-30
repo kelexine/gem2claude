@@ -1,14 +1,11 @@
-use axum::{body::Body, extract::State, response::IntoResponse, routing::post, Router};
+use axum::{body::Body, response::IntoResponse, Router};
 use futures::StreamExt;
 use gem2claude::{
-    config::{AppConfig, GeminiConfig, OAuthConfig},
-    gemini::GeminiClient,
-    oauth::OAuthManager,
-    server::create_router,
+    config::AppConfig, gemini::GeminiClient, oauth::OAuthManager, server::create_router,
 };
-use http_body_util::BodyExt;
+
 use std::os::unix::fs::PermissionsExt;
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::time::Duration;
 use tokio::{net::TcpListener, sync::oneshot};
 use tower::util::ServiceExt; // for oneshot // for collect
 
@@ -16,7 +13,7 @@ use tower::util::ServiceExt; // for oneshot // for collect
 async fn test_sse_keepalive_ping() {
     // 1. Setup Mock Backend (Fake Gemini API)
     let (tx, rx) = oneshot::channel();
-    let mock_server = tokio::spawn(async move {
+    let _mock_server = tokio::spawn(async move {
         let app = Router::new().route("/*path", axum::routing::any(mock_dispatcher));
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
