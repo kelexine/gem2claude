@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use gem2claude::translation::stream_processors::{process_text_segment, BlockType};
+use gem2claude::translation::stream_processors::process_text_segment;
 
 fn bench_process_text_segment(c: &mut Criterion) {
     let text =

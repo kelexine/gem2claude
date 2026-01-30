@@ -137,10 +137,7 @@ where
                         // Advance past the delimiter
                         buffer.advance(delim_len);
 
-                        // Only convert to UTF-8 for the complete event
-                        let event_str = String::from_utf8_lossy(&event_bytes);
-
-                        if let Some(response) = parse_sse_event(&event_str) {
+                        if let Some(response) = parse_sse_event(&event_bytes) {
                             yield Ok(response);
                         }
                     }
@@ -155,11 +152,8 @@ where
 
         // Final buffer flush
         if !buffer.is_empty() {
-             let event_str = String::from_utf8_lossy(&buffer);
-             if !event_str.trim().is_empty() {
-                if let Some(response) = parse_sse_event(&event_str) {
-                    yield Ok(response);
-                }
+             if let Some(response) = parse_sse_event(&buffer) {
+                 yield Ok(response);
              }
         }
 
@@ -167,46 +161,68 @@ where
     }
 }
 
-/// Parses a raw SSE event string into a structured `GenerateContentResponse`.
+/// Parses a raw SSE event byte slice into a structured `GenerateContentResponse`.
 ///
 /// Extracts the `data:` segment and handles protocol control markers like `[DONE]`.
-fn parse_sse_event(event_data: &str) -> Option<GenerateContentResponse> {
-    let lines: Vec<&str> = event_data.lines().collect();
+/// Performed on raw bytes to avoid unnecessary UTF-8 validation and allocation.
+fn parse_sse_event(event_bytes: &[u8]) -> Option<GenerateContentResponse> {
+    let mut data_payload = None;
 
-    let mut data_line = None;
-    for line in lines {
-        // SSE standard: data lines are prefixed with 'data:'
-        if let Some(data) = line.strip_prefix("data:") {
-            data_line = Some(data.trim());
-            break;
-        }
-        // Handle variations with explicit space.
-        if let Some(data) = line.strip_prefix("data: ") {
-            data_line = Some(data);
+    // Split by newline
+    for line in event_bytes.split(|&b| b == b'\n') {
+        let trimmed = trim_bytes(line);
+
+        // Check for "data:" or "data: "
+        if trimmed.starts_with(b"data:") {
+            let data = if trimmed.starts_with(b"data: ") {
+                &trimmed[6..]
+            } else {
+                &trimmed[5..]
+            };
+            data_payload = Some(data);
             break;
         }
     }
 
-    let data = data_line?;
+    let data = data_payload?;
 
     // The [DONE] marker is a protocol signal that generation is complete.
-    if data.is_empty() || data == "[DONE]" {
-        debug!("Filtered SSE control marker: {}", data);
+    if data.is_empty() || data == b"[DONE]" {
+        debug!(
+            "Filtered SSE control marker: {:?}",
+            String::from_utf8_lossy(data)
+        );
         return None;
     }
 
     // Individual JSON chunks represent incremental updates to the candidate list.
-    match serde_json::from_str::<GenerateContentResponse>(data) {
+    match serde_json::from_slice::<GenerateContentResponse>(data) {
         Ok(response) => Some(response),
         Err(e) => {
             warn!("JSON decode error in SSE stream: {}", e);
-            debug!(
-                "Fragment causing error: {}",
-                data.chars().take(200).collect::<String>()
-            );
+            debug!("Fragment causing error: {}", String::from_utf8_lossy(data));
             None
         }
     }
+}
+
+/// Helper to trim whitespace from bytes (similar to str::trim)
+fn trim_bytes(mut bytes: &[u8]) -> &[u8] {
+    while let Some((first, rest)) = bytes.split_first() {
+        if first.is_ascii_whitespace() {
+            bytes = rest;
+        } else {
+            break;
+        }
+    }
+    while let Some((last, rest)) = bytes.split_last() {
+        if last.is_ascii_whitespace() {
+            bytes = rest;
+        } else {
+            break;
+        }
+    }
+    bytes
 }
 
 #[cfg(test)]
@@ -216,14 +232,14 @@ mod tests {
     #[test]
     fn test_parse_sse_event() {
         let event =  "event: message\ndata: {\"response\":{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\" Hello\"}]}}]}}";
-        let result = parse_sse_event(event);
+        let result = parse_sse_event(event.as_bytes());
         assert!(result.is_some());
     }
 
     #[test]
     fn test_parse_sse_event_no_data() {
         let event = "event: ping";
-        let result = parse_sse_event(event);
+        let result = parse_sse_event(event.as_bytes());
         assert!(result.is_none());
     }
 

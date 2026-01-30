@@ -14,17 +14,17 @@ pub enum BlockType {
 }
 
 /// Segments a text chunk into logical parts by detecting `<think>` and `</think>` tags.
-pub fn process_text_segment(
-    text: &str,
+pub fn process_text_segment<'a>(
+    text: &'a str,
     in_thinking: &mut bool,
     thinking_buffer: &mut String,
-) -> Vec<(BlockType, String)> {
+) -> Vec<(BlockType, std::borrow::Cow<'a, str>)> {
     let mut segments = Vec::new();
 
     // Fast path: if no tags involved and not in thinking mode, just return text
     if !*in_thinking && !text.contains("<think") {
         if !text.is_empty() {
-            segments.push((BlockType::Text, text.to_string()));
+            segments.push((BlockType::Text, std::borrow::Cow::Borrowed(text)));
         }
         return segments;
     }
@@ -42,14 +42,22 @@ pub fn process_text_segment(
         if combined.len() > 10 * 1024 * 1024 {
             tracing::error!("Thinking buffer safety limit (10MB) exceeded.");
             let cleaned = combined.replace("<think>", "").replace("</think>", "");
-            segments.push((BlockType::Text, cleaned));
+            segments.push((BlockType::Text, std::borrow::Cow::Owned(cleaned)));
             *in_thinking = false;
             return segments;
         }
 
         // Recursive call with cleared buffer to handle the boundary condition
         // This is rare (only happens on split tags), so the recursion overhead is negligible across the stream
-        return process_text_segment(&combined, in_thinking, thinking_buffer);
+        let recursive_result = process_text_segment(&combined, in_thinking, thinking_buffer);
+
+        // We must convert to Owned because 'combined' is local and will be dropped
+        return recursive_result
+            .into_iter()
+            .map(|(bt, cow): (BlockType, std::borrow::Cow<'_, str>)| {
+                (bt, std::borrow::Cow::Owned(cow.into_owned()))
+            })
+            .collect();
     }
 
     while current_pos < len {
@@ -60,7 +68,7 @@ pub fn process_text_segment(
                     let content = &text[current_pos..end_tag_start];
 
                     if !content.is_empty() {
-                        segments.push((BlockType::Thinking, content.to_string()));
+                        segments.push((BlockType::Thinking, std::borrow::Cow::Borrowed(content)));
                     }
 
                     *in_thinking = false;
@@ -72,7 +80,8 @@ pub fn process_text_segment(
                     {
                         let content = &text[current_pos..current_pos + partial_start];
                         if !content.is_empty() {
-                            segments.push((BlockType::Thinking, content.to_string()));
+                            segments
+                                .push((BlockType::Thinking, std::borrow::Cow::Borrowed(content)));
                         }
                         thinking_buffer.push_str(&text[current_pos + partial_start..]);
                         current_pos = len; // Done with this chunk
@@ -80,7 +89,8 @@ pub fn process_text_segment(
                         // All remaining is thinking
                         let content = &text[current_pos..];
                         if !content.is_empty() {
-                            segments.push((BlockType::Thinking, content.to_string()));
+                            segments
+                                .push((BlockType::Thinking, std::borrow::Cow::Borrowed(content)));
                         }
                         current_pos = len;
                     }
@@ -93,7 +103,7 @@ pub fn process_text_segment(
                     let content = &text[current_pos..tag_start];
 
                     if !content.is_empty() {
-                        segments.push((BlockType::Text, content.to_string()));
+                        segments.push((BlockType::Text, std::borrow::Cow::Borrowed(content)));
                     }
 
                     *in_thinking = true;
@@ -104,7 +114,7 @@ pub fn process_text_segment(
                     if let Some(partial_start) = find_partial_tag(&text[current_pos..], "<think>") {
                         let content = &text[current_pos..current_pos + partial_start];
                         if !content.is_empty() {
-                            segments.push((BlockType::Text, content.to_string()));
+                            segments.push((BlockType::Text, std::borrow::Cow::Borrowed(content)));
                         }
                         thinking_buffer.push_str(&text[current_pos + partial_start..]);
                         current_pos = len;
@@ -112,7 +122,7 @@ pub fn process_text_segment(
                         // All remaining is text
                         let content = &text[current_pos..];
                         if !content.is_empty() {
-                            segments.push((BlockType::Text, content.to_string()));
+                            segments.push((BlockType::Text, std::borrow::Cow::Borrowed(content)));
                         }
                         current_pos = len;
                     }

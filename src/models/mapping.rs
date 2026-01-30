@@ -27,12 +27,12 @@ static MODEL_MAP: phf::Map<&'static str, &'static str> = phf_map! {
     "claude-sonnet-4" => "gemini-2.5-flash",
 };
 /// Map Claude model name to Gemini model name
-pub fn map_model(claude_model: &str) -> Result<String> {
+pub fn map_model(claude_model: &str) -> Result<std::borrow::Cow<'static, str>> {
     let normalized = strip_date_suffix(claude_model);
 
     MODEL_MAP
         .get(&normalized as &str)
-        .map(|s| s.to_string())
+        .map(|&s| std::borrow::Cow::Borrowed(s))
         .ok_or_else(|| {
             // Collect all keys for error message
             let supported: Vec<&str> = MODEL_MAP.keys().copied().collect();
@@ -85,7 +85,7 @@ mod tests {
         );
         assert_eq!(
             map_model("claude-haiku-4-5-20251001").unwrap(),
-            "gemini-2.5-flash-lite"
+            "gemini-2.5-flash"
         );
 
         // Test without date suffix

@@ -74,7 +74,7 @@ pub async fn translate_request(
         // Get the mapped Gemini model name
         // map_model returns Result<String, ProxyError>, unwrap_or falls back to original model
         let gemini_model = crate::models::mapping::map_model(&anthropic_req.model)
-            .unwrap_or_else(|_| anthropic_req.model.clone());
+            .unwrap_or_else(|_| anthropic_req.model.clone().into());
 
         // Gemini 3.x models use thinking Level enum with remapped budgets
         if gemini_model.contains("gemini-3") {

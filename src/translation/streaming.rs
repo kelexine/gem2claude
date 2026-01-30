@@ -69,7 +69,10 @@ impl StreamTranslator {
     }
 
     /// Segments a text chunk into logical parts by detecting `<think>` and `</think>` tags.
-    fn process_text_chunk(&mut self, text: &str) -> Vec<(BlockType, String)> {
+    fn process_text_chunk<'a>(
+        &mut self,
+        text: &'a str,
+    ) -> Vec<(BlockType, std::borrow::Cow<'a, str>)> {
         process_text_segment(text, &mut self.in_thinking, &mut self.thinking_buffer)
     }
 
@@ -246,8 +249,12 @@ impl StreamTranslator {
 
             if !content.is_empty() {
                 let delta = match block_type {
-                    BlockType::Text => Delta::TextDelta { text: content },
-                    BlockType::Thinking => Delta::ThinkingDelta { thinking: content },
+                    BlockType::Text => Delta::TextDelta {
+                        text: content.into_owned(),
+                    },
+                    BlockType::Thinking => Delta::ThinkingDelta {
+                        thinking: content.into_owned(),
+                    },
                     BlockType::ToolUse => unreachable!(),
                 };
                 events.push(StreamEvent::ContentBlockDelta {
@@ -357,8 +364,14 @@ mod tests {
         let segments = translator.process_text_chunk("Hello <think>internal</think> world");
 
         assert_eq!(segments.len(), 3);
-        assert_eq!(segments[0], (BlockType::Text, "Hello ".to_string()));
-        assert_eq!(segments[1], (BlockType::Thinking, "internal".to_string()));
+        assert_eq!(
+            segments[0],
+            (BlockType::Text, std::borrow::Cow::Borrowed("Hello "))
+        );
+        assert_eq!(
+            segments[1],
+            (BlockType::Thinking, std::borrow::Cow::Borrowed("internal"))
+        );
     }
 
     #[test]
