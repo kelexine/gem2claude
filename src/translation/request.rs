@@ -2,9 +2,7 @@
 // Author: kelexine (https://github.com/kelexine)
 
 use crate::error::{ProxyError, Result};
-use crate::models::anthropic::{
-    ContentBlock, Message, MessageContent, MessagesRequest,
-};
+use crate::models::anthropic::{ContentBlock, Message, MessageContent, MessagesRequest};
 use crate::models::gemini::{
     Content, GenerateContentRequest, GenerationConfig, Part as GeminiPart, SystemInstruction,
     ThinkingConfig as GeminiThinkingConfig,
@@ -91,12 +89,16 @@ pub async fn translate_request(
     let thinking_config = if let Some(thinking) = &anthropic_req.thinking {
         let is_adaptive = thinking.type_ == "adaptive";
         if thinking.type_ != "enabled" && !is_adaptive {
-             // If neither enabled nor adaptive, skip thinking translation?
-             // Or error? For now, we assume "disabled" implies None.
-             None
+            // If neither enabled nor adaptive, skip thinking translation?
+            // Or error? For now, we assume "disabled" implies None.
+            None
         } else {
             // Determine effort level
-            let effort = anthropic_req.output_config.as_ref().and_then(|c| c.effort.as_deref()).unwrap_or("high");
+            let effort = anthropic_req
+                .output_config
+                .as_ref()
+                .and_then(|c| c.effort.as_deref())
+                .unwrap_or("high");
 
             // Gemini 3.x models use thinking Level
             if gemini_model.contains("gemini-3") {
@@ -139,9 +141,9 @@ pub async fn translate_request(
     // 7. Extract Output Format (JSON Schema)
     let (response_mime_type, response_schema) = if let Some(config) = &anthropic_req.output_config {
         if let Some(format) = &config.format {
-             (Some("application/json".to_string()), Some(format.clone()))
+            (Some("application/json".to_string()), Some(format.clone()))
         } else {
-             (None, None)
+            (None, None)
         }
     } else {
         (None, None)
@@ -183,7 +185,10 @@ pub async fn translate_request(
         system_instruction.is_some(),
         tools.is_some(),
         tool_config.is_some(),
-        generation_config.as_ref().and_then(|g| g.thinking_config.as_ref()).is_some()
+        generation_config
+            .as_ref()
+            .and_then(|g| g.thinking_config.as_ref())
+            .is_some()
     );
 
     Ok(GenerateContentRequest {
