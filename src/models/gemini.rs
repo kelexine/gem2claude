@@ -177,6 +177,10 @@ pub struct GenerationConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "thinkingConfig")]
     pub thinking_config: Option<ThinkingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_mime_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_schema: Option<Value>,
 }
 
 /// Extended thinking configuration for Gemini models.

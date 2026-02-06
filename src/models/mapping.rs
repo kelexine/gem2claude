@@ -6,6 +6,11 @@ use phf::phf_map;
 
 /// Compile-time hash map for model mapping
 static MODEL_MAP: phf::Map<&'static str, &'static str> = phf_map! {
+    // Claude 4.6 Generation (Feb 2026+)
+    "claude-opus-4-6" => "gemini-3-pro-preview",
+    "claude-sonnet-4-6" => "gemini-3-flash-preview",
+    "claude-haiku-4-6" => "gemini-2.5-flash",
+
     // Claude 4.5 and Gemini 3 Generation (Sep 2025 - Jan 2026)
     "claude-opus-4-5-20251101" => "gemini-3-pro-preview",
     "claude-opus-4.5" => "gemini-3-pro-preview",
@@ -63,6 +68,10 @@ mod tests {
 
     #[test]
     fn test_model_mapping() {
+        assert_eq!(
+            map_model("claude-opus-4-6").unwrap(),
+            "gemini-3-pro-preview"
+        );
         assert_eq!(
             map_model("claude-sonnet-4.5").unwrap(),
             "gemini-3-flash-preview"

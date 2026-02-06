@@ -49,9 +49,25 @@ pub struct MessagesRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<ThinkingConfig>,
 
+    /// Configuration for output (Claude 4.6+).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_config: Option<OutputConfig>,
+
     /// Whether to incrementally stream the response using server-sent events.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
+}
+
+/// Output configuration parameters
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutputConfig {
+    /// The effort level to use for the response (low, medium, high, max).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+
+    /// The format of the output (e.g., JSON schema).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format: Option<Value>,
 }
 
 /// System prompt can be either a simple string or structured blocks
@@ -271,10 +287,12 @@ impl MessagesResponse {
 /// Extended thinking configuration (Claude 3.7+).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThinkingConfig {
-    /// Enable thinking (must be "enabled").
+    /// Enable thinking ("enabled" or "adaptive").
     #[serde(rename = "type")]
     pub type_: String,
 
     /// Maximum number of tokens allowed for thinking.
-    pub budget_tokens: u32,
+    /// Optional for "adaptive" mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget_tokens: Option<u32>,
 }

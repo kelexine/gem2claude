@@ -14,7 +14,7 @@ A blazing-fast proxy that lets you use **Claude Code** with Google's Gemini mode
 - 📊 **Google AI Pro/Ultra Access** — Access to higher limits and latest flagship models
 - 🚀 **Full Claude Code Support** — Streaming, tool calls, vision, extended thinking
 - ⚡ **Optimized Performance** — Connection pooling, TCP keep-alive, minimal latency
-- 🧠 **Extended Thinking** — Ultrathink support with real-time streaming
+- 🧠 **Extended Thinking** — Adaptive thinking (Claude 4.6) & Ultrathink
 - 👁️ **Vision Support** — Image analysis (JPEG, PNG, WebP, GIF, HEIC up to 100MB)
 - 🔧 **Tool Execution** — File operations, bash commands, browser automation
 - 💾 **Context Caching** — Reduce costs and latency with LRU-backed translation caching
@@ -39,6 +39,9 @@ A blazing-fast proxy that lets you use **Claude Code** with Google's Gemini mode
 
 | Claude Model | Gemini Backend | Context Caching | Best For |
 |--------------|----------------|-----------------|----------|
+| `claude-opus-4-6` | `gemini-3-pro-preview` | ✅ | **Top reasoning**, adaptive thinking |
+| `claude-sonnet-4-6` | `gemini-3-flash-preview` | ✅ | **Fastest reasoning**, code review |
+| `claude-haiku-4-6` | `gemini-2.5-flash` | ✅ | fast responses |
 | `claude-opus-4-5` | `gemini-3-pro-preview` | ✅ | Complex reasoning, analysis, Coding |
 | `claude-sonnet-4-5` | `gemini-3-flash-preview` | ✅ | Fast responses & code review |
 | `claude-haiku-4-5` | `gemini-2.5-pro` | ✅ | Past Flagship Model |
@@ -89,7 +92,17 @@ Add to `~/.bashrc` or `~/.zshrc` for persistence.
 
 ## 🎯 Key Features
 
-### Extended Thinking (Ultrathink) 
+### Adaptive Thinking (Claude 4.6)
+
+Full support for **Claude 4.6 Adaptive Thinking** via the `effort` parameter:
+
+- **Smart Mapping**:
+  - `low` → Gemini 3.0 `LOW` / Gemini 2.5 `5k tokens`
+  - `medium` → Gemini 3.0 `MEDIUM` / Gemini 2.5 `12k tokens`
+  - `high`/`max` → Gemini 3.0 `HIGH` / Gemini 2.5 `24k tokens`
+- **Native**: Uses Gemini's `thinking_level` for 3.0 models.
+
+### Extended Thinking (Ultrathink)
 
 gem2claude detects the **"Ultrathink" keyword** in your messages and automatically enables Gemini's highest thinking level (30k+ tokens):
 
