@@ -1,25 +1,8 @@
 // Helper functions for request translation
 // Author: kelexine (https://github.com/kelexine)
 
-use crate::models::anthropic::{ContentBlock, MessageContent, MessagesRequest};
 // use tracing::debug;
 
-/// Detect "Ultrathink" keyword in user messages.
-pub fn detect_ultrathink(req: &MessagesRequest) -> bool {
-    req.messages.iter().any(|msg| {
-        if msg.role != "user" {
-            return false;
-        }
-
-        match &msg.content {
-            MessageContent::Text(text) => text.to_lowercase().contains("ultrathink"),
-            MessageContent::Blocks(blocks) => blocks.iter().any(|block| match block {
-                ContentBlock::Text { text, .. } => text.to_lowercase().contains("ultrathink"),
-                _ => false,
-            }),
-        }
-    })
-}
 
 /// Helper to build the system instruction string with authorship info.
 pub fn build_system_instruction(

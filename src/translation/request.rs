@@ -11,7 +11,7 @@ use crate::models::mapping::map_model;
 use crate::translation::tools::{translate_tool_result, translate_tool_use, translate_tools};
 use tracing::debug;
 
-use crate::translation::helpers::{build_system_instruction, detect_ultrathink};
+use crate::translation::helpers::build_system_instruction;
 
 /// Translate Anthropic MessagesRequest to Gemini GenerateContentRequest.
 ///
@@ -23,7 +23,7 @@ use crate::translation::helpers::{build_system_instruction, detect_ultrathink};
 /// 5. Translates tool definitions
 /// 6. Configures generation parameters
 pub async fn translate_request(
-    mut anthropic_req: MessagesRequest,
+    anthropic_req: MessagesRequest,
     _project_id: &str,
     _cache_manager: Option<&crate::cache::CacheManager>,
     _gemini_client: Option<&crate::gemini::GeminiClient>,
@@ -39,21 +39,7 @@ pub async fn translate_request(
         }
     }
 
-    // 1. Detect Ultrathink keyword and enable extended thinking
-    let has_ultrathink = detect_ultrathink(&anthropic_req);
-    // Note: Ultrathink override might conflict with adaptive mode if both present?
-    // We'll let explicit thinking config take precedence if strictly set, else ultrathink forces it.
-    // For now, keep existing ultrathink logic but verify it works with new structs.
-    if has_ultrathink && anthropic_req.thinking.is_none() {
-        debug!("Ultrathink keyword detected - enabling highest thinking level");
-        // Force highest thinking level when Ultrathink is present
-        anthropic_req.thinking = Some(crate::models::anthropic::ThinkingConfig {
-            type_: "enabled".to_string(),
-            budget_tokens: Some(24_576),
-        });
-    }
-
-    // 2. Map model name
+    // 1. Map model name
     let gemini_model = match map_model(&anthropic_req.model) {
         Ok(m) => m,
         Err(_) => {

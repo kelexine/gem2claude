@@ -14,7 +14,7 @@ A blazing-fast proxy that lets you use **Claude Code** with Google's Gemini mode
 - 📊 **Google AI Pro/Ultra Access** — Access to higher limits and latest flagship models
 - 🚀 **Full Claude Code Support** — Streaming, tool calls, vision, extended thinking
 - ⚡ **Optimized Performance** — Connection pooling, TCP keep-alive, minimal latency
-- 🧠 **Extended Thinking** — Adaptive thinking (Claude 4.6) & Ultrathink
+- 🧠 **Extended Thinking** — Adaptive thinking (Claude 4.6)
 - 👁️ **Vision Support** — Image analysis (JPEG, PNG, WebP, GIF, HEIC up to 100MB)
 - 🔧 **Tool Execution** — File operations, bash commands, browser automation
 - 💾 **Context Caching** — Reduce costs and latency with LRU-backed translation caching
@@ -102,23 +102,6 @@ Full support for **Claude 4.6 Adaptive Thinking** via the `effort` parameter:
   - `high`/`max` → Gemini 3.0 `HIGH` / Gemini 2.5 `24k tokens`
 - **Native**: Uses Gemini's `thinking_level` for 3.0 models.
 
-### Extended Thinking (Ultrathink)
-
-gem2claude detects the **"Ultrathink" keyword** in your messages and automatically enables Gemini's highest thinking level (30k+ tokens):
-
-```
-❯ Ultrathink: explain this codebase architecture
-```
-
-**Features:**
-- **Auto-detection**: Case-insensitive keyword scanning in user messages
-- **Highest level**: Forces 30k+ token thinking budget
-- **Remapped budgets**: LOW→15k, MEDIUM→20k, HIGH→30k+ tokens
-- **Real-time streaming**: Thinking content streams as it's generated
-
-**Note**: Claude Code v2.1.9+ deprecated native Ultrathink support and now uses max thinking by default. However, gem2claude's detection still works for direct API calls, older clients, and explicit user control.
-
-The proxy translates Gemini's native thinking to Claude's thinking blocks seamlessly.
 
 ### Vision Support
 
