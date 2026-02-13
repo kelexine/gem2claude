@@ -11,7 +11,17 @@ use crate::error::Result;
 use crate::models::gemini::GenerateContentResponse;
 use crate::models::streaming::*;
 
-use crate::translation::stream_processors::{process_text_segment, BlockType};
+/// Internal identifier for the type of content block being processed.
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum BlockType {
+    /// Standard assistant response text.
+    Text,
+    /// Internal reasoning or "thinking" content.
+    Thinking,
+    /// A call to an external tool/function.
+    #[allow(dead_code)]
+    ToolUse,
+}
 
 /// Stateful translator for a single streaming request.
 ///
@@ -40,11 +50,6 @@ pub struct StreamTranslator {
     current_block_type: Option<BlockType>,
     /// Tracks if any tool use has occurred in this message (affects finish reason).
     had_tool_use: bool,
-
-    /// Buffer for storing partial `<think>` tags between chunks.
-    thinking_buffer: String,
-    /// Flag indicating if the cursor is currently inside a `<think>` block.
-    in_thinking: bool,
 }
 
 impl StreamTranslator {
@@ -62,25 +67,14 @@ impl StreamTranslator {
             current_block_index: 0,
             current_block_type: None,
             had_tool_use: false,
-
-            thinking_buffer: String::new(),
-            in_thinking: false,
         }
-    }
-
-    /// Segments a text chunk into logical parts by detecting `<think>` and `</think>` tags.
-    fn process_text_chunk<'a>(
-        &mut self,
-        text: &'a str,
-    ) -> Vec<(BlockType, std::borrow::Cow<'a, str>)> {
-        process_text_segment(text, &mut self.in_thinking, &mut self.thinking_buffer)
     }
 
     /// Primary entry point for translating a Gemini API chunk into Anthropic events.
     ///
     /// This method manages the lifecycle of the entire stream:
     /// - Emits `message_start` on the first encounter.
-    /// - Dispatches content to `emit_thinking_content`, `emit_text_segments`, or `emit_tool_use`.
+    /// - Dispatches content to `emit_thinking_content`, `emit_text_content`, or `emit_tool_use`.
     /// - Finalizes the stream with `emit_completion` when the `finish_reason` is detected.
     pub fn translate_chunk(
         &mut self,
@@ -129,11 +123,11 @@ impl StreamTranslator {
                             thought,
                             thought_signature,
                         } => {
-                            // Gemini 2.0+ can flag text parts as native thinking content.
+                            // Gemini 2.5+ can flag text parts as native thinking content via boolean flag
                             if thought == Some(true) {
                                 self.emit_thinking_content(&text, thought_signature, &mut events);
                             } else {
-                                self.emit_text_segments(&text, &mut events);
+                                self.emit_text_content(&text, &mut events);
                             }
                         }
                         crate::models::gemini::Part::Thought {
@@ -217,51 +211,36 @@ impl StreamTranslator {
         }
     }
 
-    /// Processes regular text and translates it into `text` or `thinking` blocks.
-    fn emit_text_segments(&mut self, text: &str, events: &mut Vec<StreamEvent>) {
-        let segments = self.process_text_chunk(text);
-
-        for (block_type, content) in segments {
-            if let Some(current) = self.current_block_type {
-                if current != block_type {
-                    events.push(StreamEvent::ContentBlockStop {
-                        index: self.current_block_index,
-                    });
-                    self.current_block_index += 1;
-                    self.current_block_type = None;
-                }
-            }
-
-            if self.current_block_type.is_none() {
-                let content_block = match block_type {
-                    BlockType::Text => ContentBlockStart::Text {
-                        text: String::new(),
-                    },
-                    BlockType::Thinking => ContentBlockStart::Thinking,
-                    BlockType::ToolUse => unreachable!(),
-                };
-                events.push(StreamEvent::ContentBlockStart {
+    /// Emits content as an Anthropic `text` block.
+    fn emit_text_content(&mut self, content: &str, events: &mut Vec<StreamEvent>) {
+        // Enforce block separation: Close current block if it's not text.
+        if let Some(current) = self.current_block_type {
+            if current != BlockType::Text {
+                events.push(StreamEvent::ContentBlockStop {
                     index: self.current_block_index,
-                    content_block,
                 });
-                self.current_block_type = Some(block_type);
+                self.current_block_index += 1;
+                self.current_block_type = None;
             }
+        }
 
-            if !content.is_empty() {
-                let delta = match block_type {
-                    BlockType::Text => Delta::TextDelta {
-                        text: content.into_owned(),
-                    },
-                    BlockType::Thinking => Delta::ThinkingDelta {
-                        thinking: content.into_owned(),
-                    },
-                    BlockType::ToolUse => unreachable!(),
-                };
-                events.push(StreamEvent::ContentBlockDelta {
-                    index: self.current_block_index,
-                    delta,
-                });
-            }
+        if self.current_block_type.is_none() {
+            events.push(StreamEvent::ContentBlockStart {
+                index: self.current_block_index,
+                content_block: ContentBlockStart::Text {
+                    text: String::new(),
+                },
+            });
+            self.current_block_type = Some(BlockType::Text);
+        }
+
+        if !content.is_empty() {
+            events.push(StreamEvent::ContentBlockDelta {
+                index: self.current_block_index,
+                delta: Delta::TextDelta {
+                    text: content.to_string(),
+                },
+            });
         }
     }
 
@@ -357,27 +336,107 @@ impl StreamTranslator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::gemini::{Candidate, Content, GenerateContentResponse, Part, ResponseWrapper, UsageMetadata};
+    use serde_json::json;
 
-    #[test]
-    fn test_process_text_simple() {
-        let mut translator = StreamTranslator::new("test".to_string());
-        let segments = translator.process_text_chunk("Hello <think>internal</think> world");
-
-        assert_eq!(segments.len(), 3);
-        assert_eq!(
-            segments[0],
-            (BlockType::Text, std::borrow::Cow::Borrowed("Hello "))
-        );
-        assert_eq!(
-            segments[1],
-            (BlockType::Thinking, std::borrow::Cow::Borrowed("internal"))
-        );
+    fn create_chunk(parts: Vec<Part>, finish_reason: Option<String>) -> GenerateContentResponse {
+        GenerateContentResponse {
+            response: Some(ResponseWrapper {
+                candidates: vec![Candidate {
+                    content: Content {
+                        role: "model".to_string(),
+                        parts,
+                    },
+                    finish_reason,
+                    safety_ratings: None,
+                }],
+                usage_metadata: Some(UsageMetadata {
+                    prompt_token_count: Some(10),
+                    candidates_token_count: Some(20),
+                    total_token_count: Some(30),
+                    cached_content_token_count: None,
+                }),
+            }),
+        }
     }
 
     #[test]
-    fn test_partial_tag_detection() {
-        use crate::translation::stream_processors::find_partial_tag;
-        assert_eq!(find_partial_tag("hello<", "<think>"), Some(5));
-        assert_eq!(find_partial_tag("hello<think", "<think>"), Some(5));
+    fn test_text_only() {
+        let mut translator = StreamTranslator::new("gemini-pro".to_string());
+        let chunk = create_chunk(
+            vec![Part::Text {
+                text: "Hello".to_string(),
+                thought: None,
+                thought_signature: None,
+            }],
+            None,
+        );
+
+        let events = translator.translate_chunk(chunk).unwrap();
+        
+        // MessageStart + ContentBlockStart(Text) + ContentBlockDelta(Text)
+        assert_eq!(events.len(), 3); 
+        match &events[1] {
+            StreamEvent::ContentBlockStart { content_block: ContentBlockStart::Text { .. }, .. } => (),
+            _ => panic!("Expected Text block start"),
+        }
+    }
+
+    #[test]
+    fn test_thinking_and_text() {
+        let mut translator = StreamTranslator::new("gemini-2.0-flash".to_string());
+        
+        // Chunk 1: Thinking
+        let chunk1 = create_chunk(
+            vec![Part::Text {
+                text: "I should say hello".to_string(),
+                thought: Some(true),
+                thought_signature: None,
+            }],
+            None,
+        );
+        let events1 = translator.translate_chunk(chunk1).unwrap();
+        
+        // MessageStart + ContentBlockStart(Thinking) + ContentBlockDelta(Thinking)
+        assert!(matches!(events1[1], StreamEvent::ContentBlockStart { content_block: ContentBlockStart::Thinking, .. }));
+
+        // Chunk 2: Text
+        let chunk2 = create_chunk(
+            vec![Part::Text {
+                text: "Hello!".to_string(),
+                thought: None,
+                thought_signature: None,
+            }],
+            Some("STOP".to_string()),
+        );
+        let events2 = translator.translate_chunk(chunk2).unwrap();
+
+        // ContentBlockStop (Thinking) + ContentBlockStart(Text) + ContentBlockDelta(Text) + ContentBlockStop(Text) + MessageDelta + MessageStop
+        assert!(matches!(events2[0], StreamEvent::ContentBlockStop { .. }));
+        assert!(matches!(events2[1], StreamEvent::ContentBlockStart { content_block: ContentBlockStart::Text { .. }, .. }));
+    }
+
+    #[test]
+    fn test_tool_use() {
+        let mut translator = StreamTranslator::new("gemini-pro".to_string());
+        let chunk = create_chunk(
+            vec![Part::FunctionCall {
+                function_call: crate::models::gemini::FunctionCall {
+                    name: "get_weather".to_string(),
+                    args: json!({"location": "Paris"}),
+                },
+                thought_signature: None,
+            }],
+            Some("STOP".to_string()),
+        );
+
+        let events = translator.translate_chunk(chunk).unwrap();
+        
+        // MessageStart + ContentBlockStart(ToolUse) + ContentBlockDelta(Json) + ContentBlockStop + MessageDelta + MessageStop
+        // Note: tool use implies stop reason "tool_use"
+        let msg_delta = events.iter().find(|e| matches!(e, StreamEvent::MessageDelta { .. })).unwrap();
+        if let StreamEvent::MessageDelta { delta, .. } = msg_delta {
+             assert_eq!(delta.stop_reason, Some("tool_use".to_string()));
+        }
     }
 }

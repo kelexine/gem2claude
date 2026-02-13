@@ -5,7 +5,7 @@ pub mod helpers;
 pub mod request;
 pub mod response;
 pub mod signature_store;
-pub mod stream_processors;
+
 pub mod streaming;
 pub mod tools;
 
