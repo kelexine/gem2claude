@@ -50,7 +50,7 @@ impl OAuthManager {
     pub async fn new(config: &OAuthConfig) -> Result<Self> {
         let credentials = Self::load_credentials(&config.credentials_path)?;
 
-        debug!("Loaded OAuth credentials from {}", config.credentials_path);
+        debug!("Loaded OAuth credentials");
 
         Ok(Self {
             credentials: Arc::new(RwLock::new(credentials)),
@@ -65,7 +65,7 @@ impl OAuthManager {
 
         if !path.exists() {
             return Err(ProxyError::InvalidCredentials(format!(
-                "Credentials file not found: {}",
+                "Credentials not found: {}",
                 path.display()
             )));
         }
@@ -96,12 +96,12 @@ impl OAuthManager {
             // Allow only owner-accessible files.
             if mode != 0o600 && mode != 0o400 {
                 warn!(
-                    "Insecure permissions on {}: {:o} (expected 0600)",
+                    "Security Violation on {}: {:o} (expected 0600)",
                     path.display(),
                     mode
                 );
                 return Err(ProxyError::InvalidCredentials(format!(
-                    "Insecure file permissions: {:o}. Security policy requires 0600 (rw-------).",
+                    "Security Violation: {:o}. Security policy requires 0600 (rw-------).",
                     mode
                 )));
             }
@@ -145,7 +145,7 @@ impl OAuthManager {
             }
         }
 
-        warn!("OAuth access token expired; initiating refresh.");
+        warn!("OAuth Token expired; Refreshing...");
         match self.refresh_token().await {
             Ok(new_creds) => {
                 // Update internal thread-safe state.
@@ -159,7 +159,7 @@ impl OAuthManager {
                     error!("Persistence error while saving token: {}", e);
                 }
 
-                info!("Successfully updated and persisted OAuth transition.");
+                info!("OAuth Token Refreshed Successfully.");
                 crate::metrics::record_oauth_refresh(true);
                 Ok(new_creds.access_token.clone())
             }
@@ -243,7 +243,7 @@ impl OAuthManager {
             id_token: String::new(),
         };
 
-        debug!("Refreshed token expires in {} seconds", expires_in);
+        debug!("New Token expires in {} seconds", expires_in);
         Ok(new_creds)
     }
 

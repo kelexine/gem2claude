@@ -59,30 +59,27 @@ async fn main() -> Result<()> {
     }
 
     // Phase 3: Load OAuth credentials
-    info!(
-        "Loading OAuth credentials from {}",
-        config.oauth.credentials_path
-    );
+    info!("Loading OAuth credentials");
     let oauth_manager = OAuthManager::new(&config.oauth).await?;
 
     // Phase 4: Resolve project ID (loadCodeAssist handshake)
-    info!("Resolving Gemini Cloud Code project ID...");
+    info!("Resolving project ID...");
     let gemini_client = GeminiClient::new(&config.gemini, oauth_manager.clone()).await?;
-    info!("Project ID resolved: {}", gemini_client.project_id());
+    info!("Project ID resolved, Proceeding...");
 
     // Phase 5: Build and start HTTP server
     let app = create_router(config.clone(), gemini_client, oauth_manager)?;
     let addr: SocketAddr = format!("{}:{}", config.server.host, config.server.port).parse()?;
 
-    info!("Starting server on {}", addr);
     let listener = tokio::net::TcpListener::bind(addr).await?;
+    info!("Server Started on {}", addr);
 
     // Phase 6: Run server with graceful shutdown
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 
-    info!("Server shut down gracefully");
+    info!("Server Shut Down");
     Ok(())
 }
 

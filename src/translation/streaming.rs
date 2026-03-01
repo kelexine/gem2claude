@@ -336,7 +336,9 @@ impl StreamTranslator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::gemini::{Candidate, Content, GenerateContentResponse, Part, ResponseWrapper, UsageMetadata};
+    use crate::models::gemini::{
+        Candidate, Content, GenerateContentResponse, Part, ResponseWrapper, UsageMetadata,
+    };
     use serde_json::json;
 
     fn create_chunk(parts: Vec<Part>, finish_reason: Option<String>) -> GenerateContentResponse {
@@ -373,11 +375,14 @@ mod tests {
         );
 
         let events = translator.translate_chunk(chunk).unwrap();
-        
+
         // MessageStart + ContentBlockStart(Text) + ContentBlockDelta(Text)
-        assert_eq!(events.len(), 3); 
+        assert_eq!(events.len(), 3);
         match &events[1] {
-            StreamEvent::ContentBlockStart { content_block: ContentBlockStart::Text { .. }, .. } => (),
+            StreamEvent::ContentBlockStart {
+                content_block: ContentBlockStart::Text { .. },
+                ..
+            } => (),
             _ => panic!("Expected Text block start"),
         }
     }
@@ -385,7 +390,7 @@ mod tests {
     #[test]
     fn test_thinking_and_text() {
         let mut translator = StreamTranslator::new("gemini-2.0-flash".to_string());
-        
+
         // Chunk 1: Thinking
         let chunk1 = create_chunk(
             vec![Part::Text {
@@ -396,9 +401,15 @@ mod tests {
             None,
         );
         let events1 = translator.translate_chunk(chunk1).unwrap();
-        
+
         // MessageStart + ContentBlockStart(Thinking) + ContentBlockDelta(Thinking)
-        assert!(matches!(events1[1], StreamEvent::ContentBlockStart { content_block: ContentBlockStart::Thinking, .. }));
+        assert!(matches!(
+            events1[1],
+            StreamEvent::ContentBlockStart {
+                content_block: ContentBlockStart::Thinking,
+                ..
+            }
+        ));
 
         // Chunk 2: Text
         let chunk2 = create_chunk(
@@ -413,7 +424,13 @@ mod tests {
 
         // ContentBlockStop (Thinking) + ContentBlockStart(Text) + ContentBlockDelta(Text) + ContentBlockStop(Text) + MessageDelta + MessageStop
         assert!(matches!(events2[0], StreamEvent::ContentBlockStop { .. }));
-        assert!(matches!(events2[1], StreamEvent::ContentBlockStart { content_block: ContentBlockStart::Text { .. }, .. }));
+        assert!(matches!(
+            events2[1],
+            StreamEvent::ContentBlockStart {
+                content_block: ContentBlockStart::Text { .. },
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -431,12 +448,15 @@ mod tests {
         );
 
         let events = translator.translate_chunk(chunk).unwrap();
-        
+
         // MessageStart + ContentBlockStart(ToolUse) + ContentBlockDelta(Json) + ContentBlockStop + MessageDelta + MessageStop
         // Note: tool use implies stop reason "tool_use"
-        let msg_delta = events.iter().find(|e| matches!(e, StreamEvent::MessageDelta { .. })).unwrap();
+        let msg_delta = events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::MessageDelta { .. }))
+            .unwrap();
         if let StreamEvent::MessageDelta { delta, .. } = msg_delta {
-             assert_eq!(delta.stop_reason, Some("tool_use".to_string()));
+            assert_eq!(delta.stop_reason, Some("tool_use".to_string()));
         }
     }
 }

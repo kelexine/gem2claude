@@ -3,7 +3,6 @@
 
 // use tracing::debug;
 
-
 /// Helper to build the system instruction string with authorship info.
 pub fn build_system_instruction(
     original_sys: Option<&crate::models::anthropic::SystemPrompt>,
@@ -24,6 +23,6 @@ pub fn build_system_instruction(
             **Systems Stack**: Rust (stable) 1.92+, tokio, serde, tracing, proptest, cargo-fuzz | Python 3.12+, Go 1.24+, Java 17+
             **Code Quality**: Author attribution `// Author: kelexine | GitHub: https://github.com/kelexine`, comprehensive error handling, proper logging, security hardening, performance optimization, testing coverage, deployment readiness
             **Response Style**: Analyze before implementing, explain tradeoffs, challenge problematic requirements, include testing and deployment strategy");
-    
+
     instruction
 }

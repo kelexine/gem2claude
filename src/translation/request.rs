@@ -92,7 +92,7 @@ pub async fn translate_request(
                     "low" => "LOW",
                     "medium" => "MEDIUM",
                     "high" | "max" => "HIGH",
-                    _ => "HIGH", // Default
+                    _ => "MEDIUM", // Default
                 };
                 Some(GeminiThinkingConfig {
                     include_thoughts: Some(true),
